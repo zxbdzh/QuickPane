@@ -1,0 +1,37 @@
+[package]
+name = "quickpane"
+version = "0.1.0"
+description = "A lightweight Windows browser with an instant privacy shortcut"
+authors = ["QuickPane"]
+edition = "2021"
+
+[lib]
+name = "quickpane_lib"
+crate-type = ["staticlib", "cdylib", "rlib"]
+
+[build-dependencies]
+tauri-build = { version = "2", features = [] }
+
+[dependencies]
+tauri = { version = "2.11", features = ["unstable", "tray-icon"] }
+tauri-plugin-autostart = "2.5"
+tauri-plugin-dialog = "2.7"
+tauri-plugin-global-shortcut = "2.3"
+tauri-plugin-opener = "2.5"
+tauri-plugin-single-instance = "2.4"
+tauri-plugin-window-state = "2.4"
+argon2 = "0.5"
+rand_core = { version = "0.6", features = ["getrandom"] }
+chrono = { version = "0.4", features = ["serde"] }
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+url = "2"
+uuid = { version = "1", features = ["v4"] }
+
+[target.'cfg(windows)'.dependencies]
+windows = { version = "0.61", features = [
+  "Win32_Foundation",
+  "Win32_System_RemoteDesktop",
+  "Win32_UI_WindowsAndMessaging"
+] }
+
