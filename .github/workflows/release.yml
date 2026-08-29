@@ -15,9 +15,6 @@ env:
 jobs:
   build:
     runs-on: windows-latest
-    env:
-      AWS_ACCESS_KEY_ID: ${{ secrets.AWS_ACCESS_KEY_ID }}
-      AWS_SECRET_ACCESS_KEY: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -36,6 +33,23 @@ jobs:
       - name: Install dependencies
         run: pnpm install --frozen-lockfile
 
+      # MinIO 配置齐全时作为首选更新源，GitHub Release 始终作为兜底。
+      # 真实 MinIO 地址只存在于 Secrets 和运行时生成的覆盖文件中，不进仓库。
+      - name: Prepare updater endpoints
+        shell: pwsh
+        env:
+          MINIO_ENDPOINT: ${{ secrets.MINIO_ENDPOINT }}
+          MINIO_PUBLIC_BASE_URL: ${{ secrets.MINIO_PUBLIC_BASE_URL }}
+        run: |
+          $endpoints = @()
+          if ($env:MINIO_ENDPOINT -and $env:MINIO_PUBLIC_BASE_URL) {
+            $endpoints += ("{0}/latest.json" -f $env:MINIO_PUBLIC_BASE_URL.TrimEnd('/'))
+          }
+          $endpoints += "https://github.com/${{ github.repository }}/releases/latest/download/latest.json"
+          $config = @{ plugins = @{ updater = @{ endpoints = $endpoints } } }
+          $config | ConvertTo-Json -Depth 5 | Set-Content -Encoding utf8 updater-overrides.json
+          Get-Content updater-overrides.json
+
       - name: Build and publish GitHub Release
         uses: tauri-apps/tauri-action@v0
         env:
@@ -48,6 +62,7 @@ jobs:
           releaseBody: Automated release for ${{ github.ref_name }}
           releaseDraft: false
           prerelease: false
+          args: --config updater-overrides.json
 
       - name: Generate and upload GitHub updater manifest
         shell: pwsh
@@ -65,20 +80,27 @@ jobs:
           node scripts/make-update-manifest.mjs
           gh release upload "${{ github.ref_name }}" latest.json --clobber
 
-      - name: Sync updater files to S3
-        if: ${{ env.AWS_ACCESS_KEY_ID != '' && env.AWS_SECRET_ACCESS_KEY != '' }}
+      - name: Sync updater files to MinIO
+        if: ${{ secrets.MINIO_ENDPOINT != '' && secrets.MINIO_PUBLIC_BASE_URL != '' }}
         shell: pwsh
         env:
-          AWS_REGION: ${{ secrets.AWS_REGION || 'us-east-1' }}
+          AWS_ACCESS_KEY_ID: ${{ secrets.MINIO_ACCESS_KEY }}
+          AWS_SECRET_ACCESS_KEY: ${{ secrets.MINIO_SECRET_KEY }}
+          AWS_DEFAULT_REGION: ${{ secrets.MINIO_REGION || 'us-east-1' }}
         run: |
+          $endpoint = "${{ secrets.MINIO_ENDPOINT }}".TrimEnd('/')
+          $bucket = "${{ secrets.MINIO_BUCKET }}"
+          if (-not $bucket) { $bucket = "quickpane-releases" }
+          $publicBase = "${{ secrets.MINIO_PUBLIC_BASE_URL }}".TrimEnd('/')
           $installer = Get-ChildItem "src-tauri/target/release/bundle/nsis" -Filter "*-setup.exe" | Select-Object -First 1
           if (-not $installer) { throw "NSIS updater installer was not generated" }
           $signaturePath = "$($installer.FullName).sig"
+          aws configure set default.s3.addressing_style path
+          aws s3 cp $installer.FullName "s3://$bucket/$($installer.Name)" --endpoint-url $endpoint --content-type application/octet-stream
+          aws s3 cp $signaturePath "s3://$bucket/$($installer.Name).sig" --endpoint-url $endpoint --content-type text/plain
           $version = "${{ github.ref_name }}".TrimStart("v")
-          aws s3 cp $installer.FullName "s3://quickpane-releases/$($installer.Name)" --content-type application/octet-stream
-          aws s3 cp $signaturePath "s3://quickpane-releases/$($installer.Name).sig" --content-type text/plain
           $env:UPDATE_VERSION = $version
           $env:UPDATE_SIGNATURE = (Get-Content $signaturePath -Raw).Trim()
-          $env:UPDATE_URL = "https://quickpane-releases.s3.amazonaws.com/$($installer.Name)"
+          $env:UPDATE_URL = "$publicBase/$($installer.Name)"
           node scripts/make-update-manifest.mjs
-          aws s3 cp latest.json "s3://quickpane-releases/latest.json" --content-type application/json --cache-control "no-cache"
+          aws s3 cp latest.json "s3://$bucket/latest.json" --endpoint-url $endpoint --content-type application/json --cache-control "no-cache"
