@@ -15,6 +15,14 @@ env:
 jobs:
   build:
     runs-on: windows-latest
+    # secrets 上下文不能出现在步骤级 if 里，先统一映射到 job 环境变量再判断。
+    env:
+      MINIO_ENDPOINT: ${{ secrets.MINIO_ENDPOINT }}
+      MINIO_PUBLIC_BASE_URL: ${{ secrets.MINIO_PUBLIC_BASE_URL }}
+      MINIO_BUCKET: ${{ secrets.MINIO_BUCKET }}
+      AWS_ACCESS_KEY_ID: ${{ secrets.MINIO_ACCESS_KEY }}
+      AWS_SECRET_ACCESS_KEY: ${{ secrets.MINIO_SECRET_KEY }}
+      AWS_DEFAULT_REGION: ${{ secrets.MINIO_REGION || 'us-east-1' }}
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -37,9 +45,6 @@ jobs:
       # 真实 MinIO 地址只存在于 Secrets 和运行时生成的覆盖文件中，不进仓库。
       - name: Prepare updater endpoints
         shell: pwsh
-        env:
-          MINIO_ENDPOINT: ${{ secrets.MINIO_ENDPOINT }}
-          MINIO_PUBLIC_BASE_URL: ${{ secrets.MINIO_PUBLIC_BASE_URL }}
         run: |
           $endpoints = @()
           if ($env:MINIO_ENDPOINT -and $env:MINIO_PUBLIC_BASE_URL) {
@@ -81,17 +86,13 @@ jobs:
           gh release upload "${{ github.ref_name }}" latest.json --clobber
 
       - name: Sync updater files to MinIO
-        if: ${{ secrets.MINIO_ENDPOINT != '' && secrets.MINIO_PUBLIC_BASE_URL != '' }}
+        if: ${{ env.MINIO_ENDPOINT != '' && env.MINIO_PUBLIC_BASE_URL != '' }}
         shell: pwsh
-        env:
-          AWS_ACCESS_KEY_ID: ${{ secrets.MINIO_ACCESS_KEY }}
-          AWS_SECRET_ACCESS_KEY: ${{ secrets.MINIO_SECRET_KEY }}
-          AWS_DEFAULT_REGION: ${{ secrets.MINIO_REGION || 'us-east-1' }}
         run: |
-          $endpoint = "${{ secrets.MINIO_ENDPOINT }}".TrimEnd('/')
-          $bucket = "${{ secrets.MINIO_BUCKET }}"
+          $endpoint = $env:MINIO_ENDPOINT.TrimEnd('/')
+          $bucket = $env:MINIO_BUCKET
           if (-not $bucket) { $bucket = "quickpane-releases" }
-          $publicBase = "${{ secrets.MINIO_PUBLIC_BASE_URL }}".TrimEnd('/')
+          $publicBase = $env:MINIO_PUBLIC_BASE_URL.TrimEnd('/')
           $installer = Get-ChildItem "src-tauri/target/release/bundle/nsis" -Filter "*-setup.exe" | Select-Object -First 1
           if (-not $installer) { throw "NSIS updater installer was not generated" }
           $signaturePath = "$($installer.FullName).sig"
