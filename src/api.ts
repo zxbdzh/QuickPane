@@ -1,5 +1,5 @@
 import { invoke } from "@tauri-apps/api/core";
-import type { AppSnapshot, QuickLink } from "./types";
+import type { AppSnapshot, BrowserExtension, ProxyMode, QuickLink } from "./types";
 
 export const api = {
   snapshot: () => invoke<AppSnapshot>("get_snapshot"),
@@ -26,6 +26,8 @@ export const api = {
     historyDays: number;
     lockOnSystemLock: boolean;
     quickLinks: QuickLink[];
+    proxyMode: ProxyMode;
+    proxyUrl: string;
   }) => invoke<AppSnapshot>("update_settings", { update }),
   addBookmark: (title: string, url: string) =>
     invoke<AppSnapshot>("add_bookmark", { title, url }),
@@ -45,4 +47,15 @@ export const api = {
   unlock: (password: string) => invoke<AppSnapshot>("unlock_app", { password }),
   skipPasswordSetup: () => invoke<AppSnapshot>("skip_password_setup"),
   lockNow: () => invoke<void>("lock_now"),
+  listExtensions: () => invoke<BrowserExtension[]>("list_extensions"),
+  installExtension: () => invoke<BrowserExtension[]>("install_extension"),
+  removeExtension: (extensionId: string) =>
+    invoke<BrowserExtension[]>("remove_extension", { extensionId }),
+  setExtensionEnabled: (extensionId: string, enabled: boolean) =>
+    invoke<BrowserExtension[]>("set_extension_enabled", { extensionId, enabled }),
+  showMenuWindow: (x: number, y: number) => invoke<void>("show_menu_window", { x, y }),
+  showExtensionPopup: (url: string, x?: number, y?: number) =>
+    invoke<void>("show_extension_popup", { url, x: x ?? null, y: y ?? null }),
+  toggleExtensionPin: (extensionId: string, pinned: boolean) =>
+    invoke<AppSnapshot>("toggle_extension_pin", { extensionId, pinned }),
 };

@@ -15,6 +15,52 @@ use crate::state::{
 
 pub const CHROME_HEIGHT: f64 = 86.0;
 
+/// WebView2 的默认附加参数（与 Tauri 默认值保持一致），注入代理时必须一并带上。
+const WEBVIEW2_DEFAULT_ARGS: &str = "--disable-features=msWebOOUI,msPdfOOUI,msSmartScreenProtection";
+
+/// 代理设置 → WebView2 附加浏览器参数；system 模式返回 None（使用默认行为）。
+pub fn proxy_browser_args(proxy_mode: &str, proxy_url: &str) -> Option<String> {
+    match proxy_mode {
+        "direct" => Some(format!("{WEBVIEW2_DEFAULT_ARGS} --no-proxy-server")),
+        "custom" => {
+            let url = proxy_url.trim();
+            (!url.is_empty())
+                .then(|| format!("{WEBVIEW2_DEFAULT_ARGS} --proxy-server={url}"))
+        }
+        _ => None,
+    }
+}
+
+/// 代理是 WebView2 环境级参数，修改后必须关闭全部标签 WebView 再重建才生效。
+pub async fn recreate_tab_webviews(app: &AppHandle) -> Result<(), String> {
+    let labels: Vec<String> = app
+        .webviews()
+        .keys()
+        .filter(|label| label.starts_with("tab-"))
+        .cloned()
+        .collect();
+    for label in labels {
+        if let Some(webview) = app.get_webview(&label) {
+            let _ = webview.close();
+        }
+    }
+    let active = app.state::<AppState>().inner.lock().ok().and_then(|guard| {
+        if guard.locked || guard.shell_mode {
+            return None;
+        }
+        let tab = guard
+            .data
+            .tabs
+            .iter()
+            .find(|tab| Some(&tab.id) == guard.data.active_tab_id.as_ref())?;
+        (tab.url != "quickpane://newtab").then(|| tab.id.clone())
+    });
+    if let Some(tab_id) = active {
+        ensure_tab_webview(app, &tab_id).await?;
+    }
+    Ok(())
+}
+
 #[derive(Debug, serde::Deserialize)]
 #[serde(rename_all = "camelCase")]
 #[allow(dead_code)]
@@ -39,7 +85,8 @@ pub fn normalize_input(input: &str, search_template: &str) -> Result<String, Str
 
     if let Ok(url) = Url::parse(value) {
         return match url.scheme() {
-            "http" | "https" => Ok(url.to_string()),
+            // chrome-extension:// 用于在标签页中打开扩展面板页（WebView2 无弹出宿主）。
+            "http" | "https" | "chrome-extension" => Ok(url.to_string()),
             _ => Err("仅支持 HTTP 和 HTTPS 地址".into()),
         };
     }
@@ -74,6 +121,18 @@ pub fn browser_data_dir(app: &AppHandle) -> Result<PathBuf, String> {
     Ok(path)
 }
 
+/// 未打包浏览器扩展的安装目录，每个子文件夹一个扩展。
+/// wry 创建 WebView 时会读取该目录（不存在会导致创建失败），因此这里保证目录存在。
+pub fn extensions_dir(app: &AppHandle) -> PathBuf {
+    let path = app
+        .path()
+        .app_data_dir()
+        .map(|dir| dir.join("Extensions"))
+        .unwrap_or_else(|_| PathBuf::from("Extensions"));
+    let _ = std::fs::create_dir_all(&path);
+    path
+}
+
 fn browser_bounds(app: &AppHandle) -> Result<(LogicalPosition<f64>, LogicalSize<f64>), String> {
     let window = app
         .get_window("main")
@@ -96,7 +155,7 @@ pub async fn ensure_tab_webview(app: &AppHandle, tab_id: &str) -> Result<(), Str
         return Ok(());
     }
 
-    let (url, title, is_active, locked, shell_mode) = {
+    let (url, title, is_active, locked, shell_mode, proxy_args) = {
         let state = app.state::<AppState>();
         let guard = state.inner.lock().map_err(|_| "应用状态无法读取")?;
         let tab = guard
@@ -111,6 +170,10 @@ pub async fn ensure_tab_webview(app: &AppHandle, tab_id: &str) -> Result<(), Str
             guard.data.active_tab_id.as_deref() == Some(tab_id),
             guard.locked,
             guard.shell_mode,
+            proxy_browser_args(
+                &guard.data.settings.proxy_mode,
+                &guard.data.settings.proxy_url,
+            ),
         )
     };
 
@@ -133,6 +196,14 @@ pub async fn ensure_tab_webview(app: &AppHandle, tab_id: &str) -> Result<(), Str
         .enable_clipboard_access()
         .zoom_hotkeys_enabled(true)
         .devtools(cfg!(debug_assertions))
+        // 扩展加载进标签共享的 WebView2 Profile；目录不存在时 wry 的加载器安全跳过。
+        .browser_extensions_enabled(true)
+        .extensions_path(extensions_dir(app));
+    let builder = match &proxy_args {
+        Some(args) => builder.additional_browser_args(args),
+        None => builder,
+    };
+    let builder = builder
         .on_document_title_changed(move |_webview, next_title| {
             let state = app_for_title.state::<AppState>();
             let _ = state.mutate(|runtime| {

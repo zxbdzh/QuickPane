@@ -2789,10 +2789,12 @@ name = "quickpane"
 version = "0.1.0"
 dependencies = [
  "argon2",
+ "base64 0.22.1",
  "chrono",
  "rand_core",
  "serde",
  "serde_json",
+ "sha2",
  "tauri",
  "tauri-build",
  "tauri-plugin-autostart",

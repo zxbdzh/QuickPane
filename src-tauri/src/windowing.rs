@@ -120,6 +120,13 @@ pub fn hide_window(app: &AppHandle) {
     set_all_muted(app, true);
     let _ = window.set_fullscreen(false);
     let _ = window.hide();
+    // 菜单弹层窗口跟随主窗口一起收起，避免悬浮残留。
+    if let Some(menu) = app.get_webview_window("menu") {
+        let _ = menu.hide();
+    }
+    if let Some(popup) = app.get_webview_window("extension-popup") {
+        let _ = popup.hide();
+    }
     if let Some(state) = app.try_state::<AppState>() {
         let _ = state.mutate(|runtime| {
             runtime.window_visible = false;
@@ -262,12 +269,15 @@ fn restore_foreground_window(hwnd: isize) {
     }
     use windows::Win32::{
         Foundation::HWND,
-        UI::WindowsAndMessaging::{IsWindow, SetForegroundWindow, ShowWindow, SW_RESTORE},
+        UI::WindowsAndMessaging::{IsIconic, IsWindow, SetForegroundWindow, ShowWindow, SW_RESTORE},
     };
     let native = HWND(hwnd as *mut _);
     unsafe {
         if IsWindow(Some(native)).as_bool() {
-            let _ = ShowWindow(native, SW_RESTORE);
+            // 仅在最小化时才 RESTORE；SW_RESTORE 会把最大化窗口还原成普通大小。
+            if IsIconic(native).as_bool() {
+                let _ = ShowWindow(native, SW_RESTORE);
+            }
             let _ = SetForegroundWindow(native);
         }
     }
@@ -280,12 +290,14 @@ fn restore_foreground_window(_hwnd: isize) {}
 fn force_foreground(window: &tauri::Window) {
     use windows::Win32::{
         Foundation::HWND,
-        UI::WindowsAndMessaging::{SetForegroundWindow, ShowWindow, SW_RESTORE},
+        UI::WindowsAndMessaging::{IsIconic, SetForegroundWindow, ShowWindow, SW_RESTORE},
     };
     if let Ok(hwnd) = window.hwnd() {
         let native = HWND(hwnd.0 as *mut _);
         unsafe {
-            let _ = ShowWindow(native, SW_RESTORE);
+            if IsIconic(native).as_bool() {
+                let _ = ShowWindow(native, SW_RESTORE);
+            }
             let _ = SetForegroundWindow(native);
         }
     }

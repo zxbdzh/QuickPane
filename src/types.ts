@@ -40,6 +40,19 @@ export type QuickLink = {
   url: string;
 };
 
+export type ProxyMode = "system" | "direct" | "custom";
+
+export type BrowserExtension = {
+  id: string;
+  name: string;
+  version: string;
+  description: string;
+  enabled: boolean;
+  icon: string | null;
+  /** 声明了 default_popup 时的面板页 URL（在标签页中打开，WebView2 无弹出宿主） */
+  popupUrl: string | null;
+};
+
 export type Settings = {
   shortcut: string | null;
   autostart: boolean;
@@ -49,6 +62,9 @@ export type Settings = {
   passwordHash: string | null;
   lockOnSystemLock: boolean;
   quickLinks: QuickLink[];
+  proxyMode: ProxyMode;
+  proxyUrl: string;
+  pinnedExtensions: string[];
 };
 
 export type PersistedData = {
@@ -66,6 +82,14 @@ export type AppSnapshot = {
   locked: boolean;
   firstRun: boolean;
   windowVisible: boolean;
+  pinnedExtensions: BrowserExtension[];
 };
 
-export type ShellSection = "newtab" | "history" | "bookmarks" | "downloads" | "settings" | "lock";
+export type ShellSection =
+  | "newtab"
+  | "history"
+  | "bookmarks"
+  | "downloads"
+  | "extensions"
+  | "settings"
+  | "lock";

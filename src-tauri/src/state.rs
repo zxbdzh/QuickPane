@@ -13,6 +13,8 @@ use serde::{Deserialize, Serialize};
 use tauri::{AppHandle, Manager};
 use uuid::Uuid;
 
+use crate::extensions::{self, ExtInfo};
+
 pub const DEFAULT_HOME: &str = "https://kaodes.com";
 pub const DEFAULT_SEARCH: &str = "https://cn.bing.com/search?q={query}";
 
@@ -96,6 +98,11 @@ pub struct Settings {
     pub password_hash: Option<String>,
     pub lock_on_system_lock: bool,
     pub quick_links: Vec<QuickLink>,
+    /// "system" 跟随系统代理，"direct" 强制直连，"custom" 使用 proxy_url。
+    pub proxy_mode: String,
+    pub proxy_url: String,
+    /// 固定到导航栏的扩展 id（Extensions/ 下的文件夹名）。
+    pub pinned_extensions: Vec<String>,
 }
 
 impl Default for Settings {
@@ -113,6 +120,9 @@ impl Default for Settings {
                 title: "考得尚".into(),
                 url: DEFAULT_HOME.into(),
             }],
+            proxy_mode: "system".into(),
+            proxy_url: String::new(),
+            pinned_extensions: Vec::new(),
         }
     }
 }
@@ -151,6 +161,8 @@ pub struct AppSnapshot {
     pub locked: bool,
     pub first_run: bool,
     pub window_visible: bool,
+    /// 固定到导航栏的扩展（从磁盘实时解析，随快照事件刷新）。
+    pub pinned_extensions: Vec<ExtInfo>,
 }
 
 #[derive(Debug)]
@@ -233,11 +245,16 @@ impl AppState {
 
     pub fn snapshot(&self) -> AppSnapshot {
         let guard = self.inner.lock().expect("app state poisoned");
+        let data_dir = self.path.parent().map(Path::to_path_buf).unwrap_or_default();
         AppSnapshot {
             data: guard.data.clone(),
             locked: guard.locked,
             first_run: guard.first_run,
             window_visible: guard.window_visible,
+            pinned_extensions: extensions::pinned_infos(
+                &data_dir,
+                &guard.data.settings.pinned_extensions,
+            ),
         }
     }
 
