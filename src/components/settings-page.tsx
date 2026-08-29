@@ -1,8 +1,9 @@
-import { Check, Eye, EyeOff, Plus, X } from "lucide-react";
+import { listen } from "@tauri-apps/api/event";
+import { Check, Download, Eye, EyeOff, LoaderCircle, Plus, X } from "lucide-react";
 import type { KeyboardEvent, ReactNode } from "react";
-import { useState } from "react";
+import { useEffect, useState } from "react";
 
-import { api } from "../api";
+import { api, type UpdateInfo, type UpdateProgress } from "../api";
 import type { AppSnapshot, ProxyMode, QuickLink } from "../types";
 import { useThemePreference, type ThemePreference } from "../lib/theme";
 import { cn } from "../lib/utils";
@@ -42,6 +43,48 @@ function SettingsPage({ snapshot, applySnapshot, run }: {
   const [currentPassword, setCurrentPassword] = useState("");
   const [revealPassword, setRevealPassword] = useState(false);
   const [saved, setSaved] = useState(false);
+  const [update, setUpdate] = useState<UpdateInfo | null>(null);
+  const [checkingUpdate, setCheckingUpdate] = useState(false);
+  const [installingUpdate, setInstallingUpdate] = useState(false);
+  const [updateProgress, setUpdateProgress] = useState<UpdateProgress | null>(null);
+  const [updateMessage, setUpdateMessage] = useState<string | null>(null);
+
+  useEffect(() => {
+    let active = true;
+    let cleanup: (() => void) | undefined;
+    void listen<UpdateProgress>("update-progress", (event) => {
+      if (active) setUpdateProgress(event.payload);
+    }).then((unlisten) => {
+      if (active) cleanup = unlisten;
+      else unlisten();
+    });
+    return () => {
+      active = false;
+      cleanup?.();
+    };
+  }, []);
+
+  const checkForUpdate = async () => {
+    setCheckingUpdate(true);
+    setUpdate(null);
+    setUpdateMessage(null);
+    setUpdateProgress(null);
+    const result = await run(api.checkUpdate);
+    if (result === null) setUpdateMessage("当前已是最新版本");
+    else if (result) {
+      setUpdate(result);
+      setUpdateMessage(`发现新版本 ${result.version}`);
+    }
+    setCheckingUpdate(false);
+  };
+
+  const installAvailableUpdate = async () => {
+    setInstallingUpdate(true);
+    setUpdateMessage(null);
+    const result = await run(() => api.installUpdate().then(() => true));
+    if (result) setUpdateMessage("更新已下载，应用即将重启");
+    setInstallingUpdate(false);
+  };
 
   const save = async () => {
     const next = await run(() => api.updateSettings({ autostart, homeUrl, searchTemplate, historyDays, lockOnSystemLock, quickLinks, proxyMode, proxyUrl }));
@@ -244,6 +287,33 @@ function SettingsPage({ snapshot, applySnapshot, run }: {
               </Button>
             ) : null}
           </div>
+        </SettingsGroup>
+
+        <SettingsGroup title="软件更新" description="从配置的更新源检查并安装 QuickPane 新版本。">
+          <div className="flex flex-wrap items-center gap-2">
+            <Button variant="secondary" disabled={checkingUpdate || installingUpdate} onClick={() => void checkForUpdate()}>
+              {checkingUpdate ? <LoaderCircle className="size-4 animate-spin" /> : <Download className="size-4" />}
+              {checkingUpdate ? "检查中" : "检查更新"}
+            </Button>
+            {update ? (
+              <Button disabled={checkingUpdate || installingUpdate} onClick={() => void installAvailableUpdate()}>
+                {installingUpdate ? <LoaderCircle className="size-4 animate-spin" /> : null}
+                {installingUpdate ? "下载中" : `安装 ${update.version}`}
+              </Button>
+            ) : null}
+          </div>
+          {updateProgress ? (
+            <div className="flex flex-col gap-1.5">
+              <div className="flex justify-between text-xs text-muted-foreground">
+                <span>下载更新</span>
+                <span>{updateProgress.total ? `${Math.round((updateProgress.downloaded / updateProgress.total) * 100)}%` : "下载中"}</span>
+              </div>
+              <div className="h-1.5 overflow-hidden rounded-full bg-muted">
+                <div className="h-full bg-primary transition-[width]" style={{ width: updateProgress.total ? `${Math.min(100, (updateProgress.downloaded / updateProgress.total) * 100)}%` : "35%" }} />
+              </div>
+            </div>
+          ) : null}
+          {updateMessage ? <p className="text-xs text-muted-foreground">{updateMessage}</p> : null}
         </SettingsGroup>
 
         <SettingsGroup title="浏览数据" description="清除站点数据会退出所有网站，并删除 WebView2 缓存。">

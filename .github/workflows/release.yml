@@ -1,0 +1,84 @@
+name: Release
+
+on:
+  push:
+    tags:
+      - "v*"
+
+permissions:
+  contents: write
+
+env:
+  CARGO_TERM_COLOR: always
+  PNPM_VERSION: 10
+
+jobs:
+  build:
+    runs-on: windows-latest
+    env:
+      AWS_ACCESS_KEY_ID: ${{ secrets.AWS_ACCESS_KEY_ID }}
+      AWS_SECRET_ACCESS_KEY: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup pnpm
+        uses: pnpm/action-setup@v4
+        with:
+          version: ${{ env.PNPM_VERSION }}
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Build and publish GitHub Release
+        uses: tauri-apps/tauri-action@v0
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
+          TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
+        with:
+          tagName: ${{ github.ref_name }}
+          releaseName: QuickPane ${{ github.ref_name }}
+          releaseBody: Automated release for ${{ github.ref_name }}
+          releaseDraft: false
+          prerelease: false
+
+      - name: Generate and upload GitHub updater manifest
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          $installer = Get-ChildItem "src-tauri/target/release/bundle/nsis" -Filter "*-setup.exe" | Select-Object -First 1
+          if (-not $installer) { throw "NSIS updater installer was not generated" }
+          $signaturePath = "$($installer.FullName).sig"
+          if (-not (Test-Path $signaturePath)) { throw "Updater signature was not generated" }
+          $version = "${{ github.ref_name }}".TrimStart("v")
+          $env:UPDATE_VERSION = $version
+          $env:UPDATE_SIGNATURE = (Get-Content $signaturePath -Raw).Trim()
+          $env:UPDATE_URL = "https://github.com/${{ github.repository }}/releases/download/${{ github.ref_name }}/$($installer.Name)"
+          node scripts/make-update-manifest.mjs
+          gh release upload "${{ github.ref_name }}" latest.json --clobber
+
+      - name: Sync updater files to S3
+        if: ${{ env.AWS_ACCESS_KEY_ID != '' && env.AWS_SECRET_ACCESS_KEY != '' }}
+        shell: pwsh
+        env:
+          AWS_REGION: ${{ secrets.AWS_REGION || 'us-east-1' }}
+        run: |
+          $installer = Get-ChildItem "src-tauri/target/release/bundle/nsis" -Filter "*-setup.exe" | Select-Object -First 1
+          if (-not $installer) { throw "NSIS updater installer was not generated" }
+          $signaturePath = "$($installer.FullName).sig"
+          $version = "${{ github.ref_name }}".TrimStart("v")
+          aws s3 cp $installer.FullName "s3://quickpane-releases/$($installer.Name)" --content-type application/octet-stream
+          aws s3 cp $signaturePath "s3://quickpane-releases/$($installer.Name).sig" --content-type text/plain
+          $env:UPDATE_VERSION = $version
+          $env:UPDATE_SIGNATURE = (Get-Content $signaturePath -Raw).Trim()
+          $env:UPDATE_URL = "https://quickpane-releases.s3.amazonaws.com/$($installer.Name)"
+          node scripts/make-update-manifest.mjs
+          aws s3 cp latest.json "s3://quickpane-releases/latest.json" --content-type application/json --cache-control "no-cache"

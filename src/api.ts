@@ -1,6 +1,17 @@
 import { invoke } from "@tauri-apps/api/core";
 import type { AppSnapshot, BrowserExtension, ProxyMode, QuickLink } from "./types";
 
+export type UpdateInfo = {
+  version: string;
+  notes: string | null;
+  pubDate: string | null;
+};
+
+export type UpdateProgress = {
+  downloaded: number;
+  total: number | null;
+};
+
 export const api = {
   snapshot: () => invoke<AppSnapshot>("get_snapshot"),
   newTab: (url?: string, activate = true) =>
@@ -58,4 +69,6 @@ export const api = {
     invoke<void>("show_extension_popup", { url, x: x ?? null, y: y ?? null }),
   toggleExtensionPin: (extensionId: string, pinned: boolean) =>
     invoke<AppSnapshot>("toggle_extension_pin", { extensionId, pinned }),
+  checkUpdate: () => invoke<UpdateInfo | null>("check_update"),
+  installUpdate: () => invoke<void>("install_update"),
 };

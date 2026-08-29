@@ -3,6 +3,7 @@ mod extensions;
 mod state;
 mod windowing;
 
+use std::sync::atomic::{AtomicU64, Ordering};
 use std::time::Duration;
 
 use browser::{
@@ -17,6 +18,7 @@ use tauri::{AppHandle, Emitter, LogicalPosition, Manager, WindowEvent};
 use tauri_plugin_autostart::ManagerExt;
 use tauri_plugin_dialog::DialogExt;
 use tauri_plugin_opener::OpenerExt;
+use tauri_plugin_updater::UpdaterExt;
 use url::Url;
 use uuid::Uuid;
 use windowing::{
@@ -428,6 +430,75 @@ fn toggle_extension_pin(
     Ok(state.snapshot())
 }
 
+/// 检查更新后的待安装更新，由 install_update 消费。
+#[derive(Default)]
+pub struct UpdateState(std::sync::Mutex<Option<tauri_plugin_updater::Update>>);
+
+#[derive(serde::Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct UpdateInfo {
+    version: String,
+    notes: Option<String>,
+    pub_date: Option<String>,
+}
+
+#[tauri::command]
+async fn check_update(
+    app: AppHandle,
+    state: tauri::State<'_, UpdateState>,
+) -> Result<Option<UpdateInfo>, String> {
+    let update = app
+        .updater()
+        .map_err(|error| error.to_string())?
+        .check()
+        .await
+        .map_err(|error| error.to_string())?;
+    Ok(match update {
+        Some(update) => {
+            let info = UpdateInfo {
+                version: update.version.clone(),
+                notes: update.body.clone(),
+                pub_date: update.date.map(|date| date.to_string()),
+            };
+                *state.0.lock().map_err(|_| "更新状态异常".to_string())? = Some(update);
+            Some(info)
+        }
+        None => {
+            *state.0.lock().map_err(|_| "更新状态异常".to_string())? = None;
+            None
+        },
+    })
+}
+
+/// 下载并安装待安装更新，进度经 update-progress 事件推送，完成后应用自动重启。
+#[tauri::command]
+async fn install_update(
+    app: AppHandle,
+    state: tauri::State<'_, UpdateState>,
+) -> Result<(), String> {
+    let update = state
+        .0
+        .lock()
+        .map_err(|_| "更新状态异常".to_string())?
+        .clone()
+        .ok_or_else(|| "没有待安装的更新，请先检查更新".to_string())?;
+    let downloaded = AtomicU64::new(0);
+    update
+        .download_and_install(
+            |chunk, total| {
+                let downloaded = downloaded.fetch_add(chunk as u64, Ordering::Relaxed) + chunk as u64;
+                let _ = app.emit(
+                    "update-progress",
+                    serde_json::json!({ "downloaded": downloaded, "total": total }),
+                );
+            },
+            || {},
+        )
+        .await
+        .map_err(|error| error.to_string())?;
+    app.restart();
+}
+
 #[tauri::command]
 fn add_bookmark(
     app: AppHandle,
@@ -641,7 +712,9 @@ fn register_commands(builder: tauri::Builder<tauri::Wry>) -> tauri::Builder<taur
         set_extension_enabled,
         show_menu_window,
         show_extension_popup,
-        toggle_extension_pin
+        toggle_extension_pin,
+        check_update,
+        install_update
     ])
 }
 
@@ -659,7 +732,8 @@ pub fn run() {
                 .build(),
         )
         .plugin(tauri_plugin_dialog::init())
-        .plugin(tauri_plugin_opener::init());
+        .plugin(tauri_plugin_opener::init())
+        .plugin(tauri_plugin_updater::Builder::new().build());
 
     register_commands(builder)
         .setup(|app| {
@@ -671,6 +745,7 @@ pub fn run() {
                 .ok()
                 .and_then(|runtime| runtime.data.settings.shortcut.clone());
             app.manage(state);
+            app.manage(UpdateState::default());
 
             install_tray(&handle).map_err(std::io::Error::other)?;
             install_session_lock_listener(&handle).map_err(std::io::Error::other)?;
