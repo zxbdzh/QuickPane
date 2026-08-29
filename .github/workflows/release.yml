@@ -97,11 +97,23 @@ jobs:
           if (-not $installer) { throw "NSIS updater installer was not generated" }
           $signaturePath = "$($installer.FullName).sig"
           aws configure set default.s3.addressing_style path
-          aws s3 cp $installer.FullName "s3://$bucket/$($installer.Name)" --endpoint-url $endpoint --content-type application/octet-stream
-          aws s3 cp $signaturePath "s3://$bucket/$($installer.Name).sig" --endpoint-url $endpoint --content-type text/plain
+
+          # MinIO 偶发 SSL EOF（反代/TLS 抖动），上传失败必须让步骤失败并重试。
+          function Upload($src, $dst, $ct) {
+            for ($i = 1; $i -le 3; $i++) {
+              aws s3 cp $src $dst --endpoint-url $endpoint --content-type $ct
+              if ($LASTEXITCODE -eq 0) { return }
+              Write-Host "upload attempt $i failed: $dst"
+              Start-Sleep -Seconds (5 * $i)
+            }
+            throw "upload failed after 3 attempts: $dst"
+          }
+
+          Upload $installer.FullName "s3://$bucket/$($installer.Name)" application/octet-stream
+          Upload $signaturePath "s3://$bucket/$($installer.Name).sig" text/plain
           $version = "${{ github.ref_name }}".TrimStart("v")
           $env:UPDATE_VERSION = $version
           $env:UPDATE_SIGNATURE = (Get-Content $signaturePath -Raw).Trim()
           $env:UPDATE_URL = "$publicBase/$($installer.Name)"
           node scripts/make-update-manifest.mjs
-          aws s3 cp latest.json "s3://$bucket/latest.json" --endpoint-url $endpoint --content-type application/json --cache-control "no-cache"
+          Upload latest.json "s3://$bucket/latest.json" application/json
