@@ -1,41 +1,39 @@
 # QuickPane
 
-**A lightweight Windows browser built for instant show/hide.** One global hotkey summons the whole browser — tabs, sessions and all — and the same hotkey makes it vanish just as fast.
+**为「随叫随收」而生的轻量 Windows 浏览器。** 一个全局快捷键，整个浏览器连同所有标签页瞬间出现，再按一下瞬间消失。
 
-一个为「随叫随收」打造的轻量 Windows 浏览器：一个全局快捷键，整个浏览器连同所有标签页瞬间出现，再按一下瞬间消失。
+[English](README.en.md)
 
 [![Tauri](https://img.shields.io/badge/Tauri-2-24c8db?logo=tauri&logoColor=white)](https://v2.tauri.app)
 [![React](https://img.shields.io/badge/React-19-61dafb?logo=react&logoColor=111)](https://react.dev)
 [![Platform](https://img.shields.io/badge/Windows-10%20%7C%2011-0078d4?logo=windows&logoColor=white)]()
 [![License: MIT](https://img.shields.io/badge/License-MIT-green.svg)](./LICENSE)
 
-## Features / 功能
+## 功能
 
-- ⚡ **Instant show/hide / 即时显隐** — configurable global shortcut with modifier-key validation; the previous foreground window is restored when QuickPane hides
-- 🗂 **Persistent multi-tab session / 多标签会话持久化** — one window, tabs survive restarts
-- 🧩 **Browser extensions / 扩展支持** — install, enable, disable and remove unpacked extensions from the settings page (WebView2 Profile based, see [docs/extensions.md](docs/extensions.md))
-- 🔍 **Full browsing basics / 完整浏览能力** — URL-or-search address bar, history, bookmarks, downloads, recently closed tabs
-- 🔇 **Media auto-mute while hidden / 隐藏时自动静音** — plus on-demand session loading after background start
-- 📌 **Tray integration / 托盘集成** — tray toggle, close-to-tray
-- 🔒 **Optional app lock / 可选应用锁** — Argon2id lock on cold start and after Windows lock
-- 🚀 **Optional startup with Windows / 可选开机自启** — with window-state persistence
-- 🔄 **Signed auto-update / 签名自动更新** — GitHub Releases with minisign updater signatures, optional self-hosted MinIO mirror (see [docs/release.md](docs/release.md))
+- ⚡ **即时显隐** — 全局快捷键可自定义（带修饰键校验）；隐藏时自动还原之前的前台窗口
+- 🗂 **多标签会话持久化** — 单窗口多标签，重启后会话完整恢复
+- 🧩 **浏览器扩展支持** — 设置页可安装、启停、卸载未打包扩展（基于 WebView2 Profile，见 [docs/extensions.md](docs/extensions.md)）
+- 🔍 **完整浏览能力** — 地址栏支持 URL 直达或搜索，历史记录、书签、下载、最近关闭标签页
+- 🔇 **隐藏时自动静音媒体** — 后台启动后按需加载会话
+- 📌 **托盘集成** — 托盘开关、关闭最小化到托盘
+- 🔒 **可选应用锁** — 冷启动与 Windows 锁屏后需 Argon2id 密码解锁
+- 🚀 **可选开机自启** — 并持久化窗口状态
+- 🔄 **签名自动更新** — GitHub Release + minisign 更新签名，可选自建 MinIO 镜像（见 [docs/release.md](docs/release.md)）
 
-## Install / 安装
+## 安装
 
-Download the latest NSIS installer from [Releases](https://github.com/zxbdzh/QuickPane/releases). The installer detects the Windows WebView2 Evergreen Runtime and downloads it when needed.
+从 [Releases](https://github.com/zxbdzh/QuickPane/releases) 下载最新安装包（NSIS）。安装器会自动检测并按需下载 Windows WebView2 Evergreen Runtime。
 
-从 [Releases](https://github.com/zxbdzh/QuickPane/releases) 下载最新安装包（NSIS）。安装器会自动检测并按需下载 WebView2 Evergreen Runtime。
+## 开发
 
-## Development / 开发
-
-Requirements: Node.js 20+, pnpm, Rust toolchain, WebView2 Runtime (Windows 10/11).
+环境要求：Node.js 20+、pnpm、Rust 工具链、WebView2 Runtime（Windows 10/11）。
 
 ```bash
 pnpm install
 pnpm tauri dev
 ```
 
-## License
+## 许可证
 
 [MIT](./LICENSE)
