@@ -1,16 +1,14 @@
 <div align="center">
 
-<img src="src-tauri/icons/128x128.png" alt="QuickPane" width="96" height="96" />
+<img src="src-tauri/icons/128x128.png" alt="QuickPane" width="88" height="88" />
 
 # QuickPane
 
-[English](README.en.md)
+**按一下快捷键，浏览器立即出现；再按一下，回到原来的工作。**
 
-**为「随叫随收」而生的轻量 Windows 浏览器。** 一个全局快捷键，整个浏览器连同所有标签页瞬间出现，再按一下瞬间消失。
+一个为 Windows 打造的轻量级快捷浏览器。保留标签页、历史记录、书签和扩展，却不会一直占据任务栏。
 
-<sub>// Tauri 2 + WebView2 · Windows 10/11</sub>
-
-<br />
+[下载最新版本](https://github.com/zxbdzh/QuickPane/releases/latest) · [报告问题](https://github.com/zxbdzh/QuickPane/issues) · [English](README.en.md)
 
 ![Tauri](https://img.shields.io/badge/Tauri-2-24c8db?logo=tauri&logoColor=white)
 ![React](https://img.shields.io/badge/React-19-61dafb?logo=react&logoColor=111)
@@ -20,39 +18,139 @@
 
 </div>
 
+<p align="center">
+  <img src="docs/assets/quickpane-new-tab.png" alt="QuickPane new tab page" width="720" />
+</p>
+
+<p align="center"><sub>QuickPane 界面：一个随时待命的轻量级浏览器。</sub></p>
+
+<p align="center">
+  <img src="docs/assets/quickpane-demo.gif" alt="QuickPane 浏览演示" width="720" />
+</p>
+
 ---
 
-## 它解决什么
+## 为什么是 QuickPane
 
-浏览器窗口在任务栏里翻来翻去、切应用回来还要等它加载——QuickPane 把整个浏览器变成一个快捷键级的存在：按一下就全在了，再按一下干干净净消失，媒体自动静音，前台窗口自动还原。
+浏览器应该在需要时出现，而不是一直占据任务栏和注意力。
+
+QuickPane 运行在后台，通过一个全局快捷键显示或隐藏整个浏览器窗口。标签页和浏览会话持续保留，隐藏时自动静音媒体，并在收起后恢复之前的前台窗口。
+
+## 界面一览
+
+<p align="center">
+  <img src="docs/assets/quickpane-browser.png" alt="QuickPane 浏览页面" width="48%" />
+  <img src="docs/assets/quickpane-settings.png" alt="QuickPane 设置页面" width="48%" />
+</p>
+<p align="center">
+  <img src="docs/assets/quickpane-extensions.png" alt="QuickPane 扩展管理" width="48%" />
+  <img src="docs/assets/quickpane-menu.png" alt="QuickPane 应用菜单" width="48%" />
+</p>
+
+## GitHub Star History
+
+<a href="https://star-history.com/#zxbdzh/QuickPane&Date">
+  <img src="https://api.star-history.com/svg?repos=zxbdzh/QuickPane&type=Date" alt="QuickPane GitHub star history" width="700" />
+</a>
+
+## 快速开始
+
+1. 从 [Releases](https://github.com/zxbdzh/QuickPane/releases/latest) 下载 Windows 安装包。
+2. 启动 QuickPane，按设置中的全局快捷键呼出窗口。
+3. 在地址栏输入网址或搜索关键词。
+4. 再按一次快捷键隐藏窗口，稍后继续上次的浏览会话。
+
+## 快捷键
+
+全局显示 / 隐藏快捷键可以在设置中自定义。快捷键至少需要包含一个修饰键和一个普通按键，例如 `Alt+Q`、`Ctrl+Alt+B`。
+
+| 操作 | 快捷键 |
+| --- | --- |
+| 显示 / 隐藏 QuickPane | 设置中自定义 |
+| 新建标签页 | `Ctrl+T` |
+| 关闭当前标签页 | `Ctrl+W` |
+| 后退 | `Alt+Left` |
+| 前进 | `Alt+Right` |
+| 刷新 | `Ctrl+R` |
+| 聚焦地址栏 | `Ctrl+L` |
+| 收藏当前页面 | `Ctrl+D` |
+| 打开历史记录 | `Ctrl+H` |
+| 打开下载记录 | `Ctrl+J` |
 
 ## 功能
 
-- ⚡ **即时显隐** — 全局快捷键可自定义（带修饰键校验）；隐藏时自动还原之前的前台窗口
-- 🗂 **多标签会话持久化** — 单窗口多标签，重启后会话完整恢复
-- 🧩 **浏览器扩展支持** — 设置页可安装、启停、卸载未打包扩展（基于 WebView2 Profile，见 [扩展支持设计](docs/extensions.md)）
-- 🔍 **完整浏览能力** — 地址栏支持 URL 直达或搜索；历史记录、书签、下载、最近关闭标签页
-- 🔇 **隐藏时自动静音媒体** — 后台启动后按需加载会话
-- 📌 **托盘集成** — 托盘开关、关闭最小化到托盘
-- 🔒 **可选应用锁** — 冷启动与 Windows 锁屏后需 Argon2id 密码解锁
-- 🚀 **可选开机自启** — 并持久化窗口状态
-- 🔄 **签名自动更新** — GitHub Release + minisign 更新签名，可选自建 MinIO 镜像（见 [发布与自动更新](docs/release.md)）
+### 随叫随收
 
-## 安装
+- 全局快捷键即时显示或隐藏窗口
+- 隐藏时自动静音网页媒体
+- 收起后自动恢复之前的前台窗口
+- 支持托盘运行、关闭时最小化到托盘
 
-从 [Releases](https://github.com/zxbdzh/QuickPane/releases) 下载最新安装包（NSIS）。安装器会自动检测并按需下载 Windows WebView2 Evergreen Runtime。
+### 浏览会话
+
+- 单窗口多标签页
+- 标签页、历史记录、书签和最近关闭页面持久化保存
+- 地址栏支持网址直达和搜索
+- 支持普通网页链接，以及在当前浏览器会话中打开新标签
+- 支持下载和页面缩放
+
+### 浏览器能力
+
+- 基于 Windows WebView2
+- 支持未打包浏览器扩展的安装、启用、停用和卸载
+- 可选应用锁，使用 Argon2id 保护冷启动和 Windows 锁屏后的访问
+- 可选随 Windows 启动
+- 支持签名自动更新
+
+## 安装要求
+
+- Windows 10 或 Windows 11
+- Windows WebView2 Evergreen Runtime
+- x64 Windows
+
+安装器会检测 WebView2 Runtime；如果系统缺少运行环境，会按需下载并安装。
+
+## 常见问题
+
+### QuickPane 是完整浏览器吗？
+
+QuickPane 是一个轻量级的快捷浏览器，适合临时查资料、查看文档和保留短期浏览会话。它不试图替代 Chrome、Edge 或 Firefox 的完整生态。
+
+### 我的数据保存在哪里？
+
+标签页、设置、历史记录和书签由 QuickPane 保存在应用数据目录中。浏览器页面数据使用独立的 WebView2 数据目录。
+
+### 为什么需要 WebView2？
+
+QuickPane 使用 Windows 原生 WebView2 渲染网页。这样可以复用系统浏览器内核，同时保持应用体积和资源占用较小。
+
+### 如何报告问题？
+
+请在 [GitHub Issues](https://github.com/zxbdzh/QuickPane/issues) 提交问题，并附上 Windows 版本、QuickPane 版本、复现步骤和相关截图。
 
 ## 开发
 
-环境要求：Node.js 20+、pnpm、Rust 工具链、WebView2 Runtime（Windows 10/11）。
+环境要求：Node.js 20+、pnpm、Rust 工具链和 WebView2 Runtime。
 
 ```bash
-pnpm install
-pnpm tauri dev
+npm install
+npm run tauri dev
 ```
 
-架构边界与约定见 [AGENTS.md](AGENTS.md)。
+常用检查：
+
+```bash
+npm test
+npm run build
+cargo check --manifest-path src-tauri/Cargo.toml
+```
+
+项目架构边界和目录约定见 [AGENTS.md](AGENTS.md)。发布与自动更新流程见 [docs/release.md](docs/release.md)。
+
+## 参与贡献
+
+欢迎提交 Bug 修复、文档改进和功能建议。提交较大改动前，建议先通过 [Issues](https://github.com/zxbdzh/QuickPane/issues) 讨论方案。
 
 ## 许可证
 
-[MIT](./LICENSE)
+[MIT](LICENSE)
