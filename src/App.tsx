@@ -118,12 +118,6 @@ function App() {
         setSection(next);
         void api.showShell(true);
       }),
-      listen<string>("new-window-requested", (event) => {
-        void api.newTab(event.payload, true).then((next) => {
-          setSnapshot(next);
-          setSection("newtab");
-        }).catch((reason) => setError(setErrorFromUnknown(reason)));
-      }),
       listen<string>("shortcut-error", (event) => setError(event.payload)),
       listen("focus-address", () => {
         window.requestAnimationFrame(() => {

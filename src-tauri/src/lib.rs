@@ -37,7 +37,7 @@ async fn new_tab(
     url: Option<String>,
     activate: Option<bool>,
 ) -> Result<AppSnapshot, String> {
-    create_tab(&app, url, activate.unwrap_or(true)).await
+    create_tab(&app, url, activate.unwrap_or(true))
 }
 
 #[tauri::command]
@@ -652,7 +652,7 @@ async fn unlock_app(
         runtime.data.active_tab_id.clone()
     })?;
     if let Some(id) = active {
-        ensure_tab_webview(&app, &id).await?;
+        ensure_tab_webview(&app, &id)?;
     }
     browser::show_active_tab(&app);
     emit_snapshot(&app);

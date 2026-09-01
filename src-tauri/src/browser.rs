@@ -18,6 +18,33 @@ pub const CHROME_HEIGHT: f64 = 86.0;
 /// WebView2 的默认附加参数（与 Tauri 默认值保持一致），注入代理时必须一并带上。
 const WEBVIEW2_DEFAULT_ARGS: &str = "--disable-features=msWebOOUI,msPdfOOUI,msSmartScreenProtection";
 
+const OPEN_TARGET_BLANK_IN_CURRENT_TAB: &str = r#"
+document.addEventListener("click", (event) => {
+  if (
+    event.defaultPrevented ||
+    event.button !== 0 ||
+    event.metaKey ||
+    event.ctrlKey ||
+    event.shiftKey ||
+    event.altKey
+  ) {
+    return;
+  }
+
+  const target = event.target;
+  const link = target instanceof Element
+    ? target.closest('a[target="_blank"][href]')
+    : null;
+  if (!link) {
+    return;
+  }
+
+  event.preventDefault();
+  event.stopImmediatePropagation();
+  window.location.assign(link.href);
+}, true);
+"#;
+
 /// 代理设置 → WebView2 附加浏览器参数；system 模式返回 None（使用默认行为）。
 pub fn proxy_browser_args(proxy_mode: &str, proxy_url: &str) -> Option<String> {
     match proxy_mode {
@@ -56,7 +83,7 @@ pub async fn recreate_tab_webviews(app: &AppHandle) -> Result<(), String> {
         (tab.url != "quickpane://newtab").then(|| tab.id.clone())
     });
     if let Some(tab_id) = active {
-        ensure_tab_webview(app, &tab_id).await?;
+        ensure_tab_webview(app, &tab_id)?;
     }
     Ok(())
 }
@@ -149,7 +176,7 @@ fn browser_bounds(app: &AppHandle) -> Result<(LogicalPosition<f64>, LogicalSize<
     ))
 }
 
-pub async fn ensure_tab_webview(app: &AppHandle, tab_id: &str) -> Result<(), String> {
+pub fn ensure_tab_webview(app: &AppHandle, tab_id: &str) -> Result<(), String> {
     let label = tab_label(tab_id);
     if app.get_webview(&label).is_some() {
         return Ok(());
@@ -190,12 +217,14 @@ pub async fn ensure_tab_webview(app: &AppHandle, tab_id: &str) -> Result<(), Str
     let tab_id_for_title = tab_id.to_string();
     let tab_id_for_load = tab_id.to_string();
 
+
     let builder = WebviewBuilder::new(label.clone(), WebviewUrl::External(external))
         .data_directory(data_dir)
         .focused(is_active)
         .enable_clipboard_access()
         .zoom_hotkeys_enabled(true)
         .devtools(cfg!(debug_assertions))
+        .initialization_script(OPEN_TARGET_BLANK_IN_CURRENT_TAB)
         // 扩展加载进标签共享的 WebView2 Profile；目录不存在时 wry 的加载器安全跳过。
         .browser_extensions_enabled(true)
         .extensions_path(extensions_dir(app));
@@ -258,7 +287,10 @@ pub async fn ensure_tab_webview(app: &AppHandle, tab_id: &str) -> Result<(), Str
         })
         .on_download(move |_webview, event| handle_download(&app_for_download, event))
         .on_new_window(move |url, _features| {
-            let _ = app_for_new_window.emit("new-window-requested", url.to_string());
+            let url = url.to_string();
+            if let Err(error) = create_tab(&app_for_new_window, Some(url), true) {
+                eprintln!("无法打开新标签页: {error}");
+            }
             tauri::webview::NewWindowResponse::Deny
         });
 
@@ -287,7 +319,7 @@ pub async fn ensure_tab_webview(app: &AppHandle, tab_id: &str) -> Result<(), Str
     Ok(())
 }
 
-pub async fn create_tab(
+pub fn create_tab(
     app: &AppHandle,
     input: Option<String>,
     activate: bool,
@@ -319,7 +351,7 @@ pub async fn create_tab(
     if activate {
         hide_all_tabs(app);
         if url != "quickpane://newtab" {
-            ensure_tab_webview(app, &id).await?;
+            ensure_tab_webview(app, &id)?;
         }
     }
     emit_snapshot(app);
@@ -346,7 +378,7 @@ pub async fn activate_tab(app: &AppHandle, tab_id: &str) -> Result<AppSnapshot, 
 
     hide_all_tabs(app);
     if !is_new_tab {
-        ensure_tab_webview(app, tab_id).await?;
+        ensure_tab_webview(app, tab_id)?;
         if let Some(webview) = app.get_webview(&tab_label(tab_id)) {
             webview.show().map_err(|error| error.to_string())?;
             webview.set_focus().map_err(|error| error.to_string())?;
@@ -393,7 +425,7 @@ pub async fn navigate_tab(
         webview.show().map_err(|error| error.to_string())?;
         webview.set_focus().map_err(|error| error.to_string())?;
     } else {
-        ensure_tab_webview(app, tab_id).await?;
+        ensure_tab_webview(app, tab_id)?;
     }
     emit_snapshot(app);
     Ok(state.snapshot())
@@ -435,7 +467,7 @@ pub async fn close_tab(app: &AppHandle, tab_id: &str) -> Result<AppSnapshot, Str
     hide_all_tabs(app);
     if let Some(id) = next_id {
         if !is_new_tab {
-            ensure_tab_webview(app, &id).await?;
+            ensure_tab_webview(app, &id)?;
             if let Some(webview) = app.get_webview(&tab_label(&id)) {
                 let _ = webview.show();
                 let _ = webview.set_focus();
@@ -479,6 +511,7 @@ pub fn show_active_tab(app: &AppHandle) {
     if let Some(id) = active {
         if let Some(webview) = app.get_webview(&tab_label(&id)) {
             let _ = webview.show();
+            let _ = webview.set_focus();
         }
     }
 }
