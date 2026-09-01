@@ -43,14 +43,22 @@ QuickPane 运行在后台，通过一个全局快捷键显示或隐藏整个浏�
   <img src="docs/assets/quickpane-settings.png" alt="QuickPane 设置页面" width="48%" />
 </p>
 <p align="center">
+  <sub>网页浏览：在独立标签页中打开网站，支持地址栏导航、后退、前进和刷新。</sub>
+  <sub>设置中心：自定义全局快捷键、主页、搜索引擎和启动行为。</sub>
+</p>
+<p align="center">
   <img src="docs/assets/quickpane-extensions.png" alt="QuickPane 扩展管理" width="48%" />
   <img src="docs/assets/quickpane-menu.png" alt="QuickPane 应用菜单" width="48%" />
+</p>
+<p align="center">
+  <sub>扩展管理：安装、启用、停用和移除未打包的浏览器扩展。</sub>
+  <sub>快捷菜单：快速访问历史记录、书签、下载、锁定、扩展和设置。</sub>
 </p>
 
 ## GitHub Star History
 
-<a href="https://star-history.com/#zxbdzh/QuickPane&Date">
-  <img src="https://api.star-history.com/svg?repos=zxbdzh/QuickPane&type=Date" alt="QuickPane GitHub star history" width="700" />
+<a href="https://star-history.com/#zxbdzh/QuickPane&amp;Date">
+  <img src="https://api.star-history.com/chart?repos=zxbdzh/QuickPane&amp;type=date" alt="QuickPane GitHub star history" width="700" />
 </a>
 
 ## 快速开始

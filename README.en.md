@@ -43,14 +43,22 @@ QuickPane runs in the background and uses one global hotkey to show or hide the 
   <img src="docs/assets/quickpane-settings.png" alt="QuickPane settings" width="48%" />
 </p>
 <p align="center">
+  <sub>Web browsing: open sites in dedicated tabs with address-bar navigation, back, forward and reload.</sub>
+  <sub>Settings: customize the global hotkey, home page, search engine and startup behavior.</sub>
+</p>
+<p align="center">
   <img src="docs/assets/quickpane-extensions.png" alt="QuickPane extensions manager" width="48%" />
   <img src="docs/assets/quickpane-menu.png" alt="QuickPane application menu" width="48%" />
+</p>
+<p align="center">
+  <sub>Extension manager: install, enable, disable and remove unpacked browser extensions.</sub>
+  <sub>Quick menu: reach history, bookmarks, downloads, lock, extensions and settings.</sub>
 </p>
 
 ## GitHub Star History
 
-<a href="https://star-history.com/#zxbdzh/QuickPane&Date">
-  <img src="https://api.star-history.com/svg?repos=zxbdzh/QuickPane&type=Date" alt="QuickPane GitHub star history" width="700" />
+<a href="https://star-history.com/#zxbdzh/QuickPane&amp;Date">
+  <img src="https://api.star-history.com/chart?repos=zxbdzh/QuickPane&amp;type=date" alt="QuickPane GitHub star history" width="700" />
 </a>
 
 ## Quick Start
