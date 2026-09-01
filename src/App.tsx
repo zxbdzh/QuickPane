@@ -6,6 +6,7 @@ import { listen } from "@tauri-apps/api/event";
 import { api } from "./api";
 import type { AppSnapshot, ShellSection, TabRecord } from "./types";
 import { pageFade } from "./lib/motion";
+import { getAddressSuggestions } from "./lib/address-suggestions";
 import { TooltipProvider } from "./components/ui/tooltip";
 import { TabStrip } from "./components/tab-strip";
 import { NavigationBar } from "./components/navigation-bar";
@@ -58,6 +59,12 @@ function App() {
     () => snapshot.data.tabs.find((tab) => tab.id === snapshot.data.activeTabId) ?? null,
     [snapshot.data.activeTabId, snapshot.data.tabs],
   );
+  const addressSuggestions = useMemo(() => getAddressSuggestions({
+    query: address,
+    quickLinks: snapshot.data.settings.quickLinks,
+    bookmarks: snapshot.data.bookmarks,
+    history: snapshot.data.history,
+  }), [address, snapshot.data.bookmarks, snapshot.data.history, snapshot.data.settings.quickLinks]);
 
   const applySnapshot = useCallback((next: AppSnapshot) => {
     setSnapshot(next);
@@ -118,6 +125,13 @@ function App() {
         }).catch((reason) => setError(setErrorFromUnknown(reason)));
       }),
       listen<string>("shortcut-error", (event) => setError(event.payload)),
+      listen("focus-address", () => {
+        window.requestAnimationFrame(() => {
+          if (document.querySelector('[role="dialog"], [role="alertdialog"]')) return;
+          addressRef.current?.focus();
+          addressRef.current?.select();
+        });
+      }),
     ]);
     return () => { void cleanups.then((items) => items.forEach((cleanup) => cleanup())); };
   }, []);
@@ -142,20 +156,38 @@ function App() {
 
   const createTab = useCallback((url?: string) => {
     setSection("newtab");
-    void run(async () => applySnapshot(await api.newTab(url, true)));
-  }, [applySnapshot, run]);
+    void run(async () => applySnapshot(
+      url && activeTab?.url === "quickpane://newtab"
+        ? await api.navigate(activeTab.id, url)
+        : await api.newTab(url, true),
+    ));
+  }, [activeTab, applySnapshot, run]);
+
+  const navigateActiveTab = useCallback((input: string) => {
+    if (!activeTab || !input.trim()) return;
+    setAddress(input);
+    setSection("newtab");
+    void run(async () => applySnapshot(await api.navigate(activeTab.id, input)));
+  }, [activeTab, applySnapshot, run]);
 
   const submitAddress = useCallback((event?: FormEvent) => {
     event?.preventDefault();
-    if (!activeTab || !address.trim()) return;
-    setSection("newtab");
-    void run(async () => applySnapshot(await api.navigate(activeTab.id, address)));
-  }, [activeTab, address, applySnapshot, run]);
+    navigateActiveTab(address);
+  }, [address, navigateActiveTab]);
+
+  const setAddressSuggestionsOpen = useCallback((open: boolean) => {
+    if (section !== "newtab" || activeTab?.url === "quickpane://newtab") return;
+    void run(() => api.showShell(open));
+  }, [activeTab?.url, run, section]);
 
   useEffect(() => {
     const handler = (event: globalThis.KeyboardEvent) => {
+      if (event.defaultPrevented) return;
       const key = event.key.toLowerCase();
-      if (event.ctrlKey && key === "l") {
+      if (key === "escape" && !snapshot.locked && !snapshot.firstRun) {
+        event.preventDefault();
+        void run(api.hide);
+      } else if (event.ctrlKey && key === "l") {
         event.preventDefault();
         addressRef.current?.focus();
         addressRef.current?.select();
@@ -199,7 +231,7 @@ function App() {
     };
     window.addEventListener("keydown", handler);
     return () => window.removeEventListener("keydown", handler);
-  }, [activeTab, applySnapshot, createTab, openSection, run, snapshot.data.recentlyClosed, zoom]);
+  }, [activeTab, applySnapshot, createTab, openSection, run, snapshot.data.recentlyClosed, snapshot.firstRun, snapshot.locked, zoom]);
 
   if (!ready) {
     return (
@@ -230,6 +262,10 @@ function App() {
               onAddress={setAddress}
               onSubmit={submitAddress}
               addressRef={addressRef}
+              suggestions={addressSuggestions}
+              onSuggestion={navigateActiveTab}
+              onSuggestionsOpenChange={setAddressSuggestionsOpen}
+              windowVisible={snapshot.windowVisible}
               bookmarked={Boolean(activeTab && snapshot.data.bookmarks.some((item) => item.url === activeTab.url))}
               onBookmark={() => {
                 if (!activeTab?.url.startsWith("http")) return;
