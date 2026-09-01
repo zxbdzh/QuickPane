@@ -55,11 +55,11 @@ QuickPane runs in the background and uses one global hotkey to show or hide the 
   <sub>Quick menu: reach history, bookmarks, downloads, lock, extensions and settings.</sub>
 </p>
 
-## GitHub Star History
+## GitHub Stars
 
-<a href="https://star-history.com/#zxbdzh/QuickPane&amp;Date">
-  <img src="https://api.star-history.com/chart?repos=zxbdzh/QuickPane&amp;type=date" alt="QuickPane GitHub star history" width="700" />
-</a>
+[![GitHub Stars](https://img.shields.io/github/stars/zxbdzh/QuickPane?style=flat)](https://github.com/zxbdzh/QuickPane/stargazers)
+
+Star QuickPane if it is useful to you. The count is updated automatically by GitHub.
 
 ## Quick Start
 

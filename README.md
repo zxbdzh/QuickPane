@@ -55,11 +55,11 @@ QuickPane 运行在后台，通过一个全局快捷键显示或隐藏整个浏�
   <sub>快捷菜单：快速访问历史记录、书签、下载、锁定、扩展和设置。</sub>
 </p>
 
-## GitHub Star History
+## GitHub Stars
 
-<a href="https://star-history.com/#zxbdzh/QuickPane&amp;Date">
-  <img src="https://api.star-history.com/chart?repos=zxbdzh/QuickPane&amp;type=date" alt="QuickPane GitHub star history" width="700" />
-</a>
+[![GitHub Stars](https://img.shields.io/github/stars/zxbdzh/QuickPane?style=flat)](https://github.com/zxbdzh/QuickPane/stargazers)
+
+欢迎 Star QuickPane，Star 数会由 GitHub 自动更新。
 
 ## 快速开始
 
