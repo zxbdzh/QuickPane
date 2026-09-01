@@ -179,13 +179,16 @@ async function invoke(command: string, args: Record<string, unknown> = {}): Prom
     case "go_forward":
     case "find_in_page":
     case "zoom_page":
-    case "hide_to_tray":
     case "exit_app":
     case "open_download":
     case "clear_site_data":
       return null;
+    case "hide_to_tray": {
+      snapshot.windowVisible = false;
+      emitSnapshot();
+      return null;
+    }
     case "show_shell": {
-      snapshot.windowVisible = Boolean(args.visible);
       emitSnapshot();
       return structuredClone(snapshot);
     }
@@ -272,6 +275,7 @@ declare global {
       error: (message: string) => void;
       theme: (value: "light" | "dark") => void;
       openSection: (section: string) => void;
+      focusAddress: () => void;
       snapshot: () => AppSnapshot;
     };
   }
@@ -306,6 +310,7 @@ export function installMockBackend() {
     },
     error: (message) => emitEvent("shortcut-error", message),
     openSection: (section) => emitEvent("open-section", section),
+    focusAddress: () => emitEvent("focus-address", null),
     theme: (value) => {
       localStorage.setItem("quickpane.theme", value);
       document.documentElement.classList.toggle("dark", value === "dark");

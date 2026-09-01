@@ -8,11 +8,12 @@
 npm install
 npm run tauri dev     # 开发（先起 vite @localhost:1420，再起 Rust）
 npm run tauri build   # 打包安装程序
-npm run build         # tsc + vite build（tsc 即类型检查，无独立 lint/测试脚本）
+npm run build         # tsc + vite build（tsc 即类型检查）
+npm test              # Node 原生测试（当前覆盖地址栏建议匹配、拼音、排序、去重与边界）
 cargo check           # 在 src-tauri/ 下检查 Rust
 ```
 
-无测试套件；验证改动需运行 `npm run tauri dev` 实际操作窗口。
+验证改动需运行相应自动化检查，并通过 `npm run tauri dev` 实际操作窗口。
 
 ## 目录与架构边界
 
@@ -30,3 +31,13 @@ cargo check           # 在 src-tauri/ 下检查 Rust
 - Windows 专用代码用 `#[cfg(windows)]` + `windows` crate（见 Cargo.toml 的 target 段）。
 - 隐藏时静音媒体、恢复前台窗口、close-to-tray 等行为在 `windowing.rs`，改动时注意不要破坏"显示时恢复上一个前台窗口"逻辑。
 - 开发运行前需本机装有 Rust toolchain 与 WebView2 运行时（Windows 11 自带）。
+
+## Agent 技能
+
+### Issue 跟踪器
+
+Issue 与规格统一记录在 `zxbdzh/QuickPane` 的 GitHub Issues 中，使用 `gh` CLI 操作。详见 `docs/agents/issue-tracker.md`。
+
+### 领域文档
+
+本仓库采用单上下文结构；相关文件存在时，先阅读根目录的 `CONTEXT.md` 和 `docs/adr/` 下与当前工作相关的 ADR。详见 `docs/agents/domain.md`。

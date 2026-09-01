@@ -143,6 +143,10 @@ pub fn show_window(app: &AppHandle) {
     let Some(window) = app.get_window("main") else {
         return;
     };
+    let was_visible = app
+        .try_state::<AppState>()
+        .and_then(|state| state.inner.lock().ok().map(|runtime| runtime.window_visible))
+        .unwrap_or(false);
     let previous = capture_foreground_window(window.hwnd().ok().map(|value| value.0 as isize));
     if let Some(state) = app.try_state::<AppState>() {
         let _ = state.mutate(|runtime| {
@@ -157,6 +161,13 @@ pub fn show_window(app: &AppHandle) {
     force_foreground(&window);
     set_all_muted(app, false);
     show_active_tab(app);
+    if !was_visible {
+        // DOM 焦点会跨隐藏保留，但 WebView2 的原生键盘焦点需要显式恢复。
+        if let Some(webview) = app.get_webview("main") {
+            let _ = webview.set_focus();
+        }
+        let _ = app.emit("focus-address", ());
+    }
     emit_snapshot(app);
 }
 
