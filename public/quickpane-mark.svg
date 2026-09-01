@@ -1,0 +1,12 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1024 1024" role="img" aria-labelledby="title">
+  <title id="title">QuickPane</title>
+  <rect x="112" y="112" width="800" height="800" rx="144" fill="#16233D"/>
+  <path
+    fill="#3E82F7"
+    d="M248 236h326l76 76v62H398q-20 0-20 20v158q0 18-13 31L248 700V236Z"
+  />
+  <path
+    fill="#F4B942"
+    d="M378 630h250q20 0 20-20V414q0-14 11-25l119-119v422l118 118-66 66-126-126H440l-62-62V630Z"
+  />
+</svg>

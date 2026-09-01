@@ -17,9 +17,7 @@ function NewTabPage({ snapshot, onNavigate, onSection }: {
   return (
     <div className="mx-auto w-full max-w-[760px] px-6 pt-[clamp(48px,10vh,104px)] pb-16">
       <header className="mb-7 flex items-center justify-center gap-3.5">
-        <div className="grid size-11 place-items-center rounded-lg border bg-surface text-xl font-bold text-primary">
-          Q
-        </div>
+        <img src="/quickpane-mark.svg" alt="" aria-hidden="true" className="size-11 shrink-0" />
         <div>
           <h1 className="text-xl font-semibold leading-tight">QuickPane</h1>
           <p className="text-xs text-muted-foreground">你的轻量浏览空间</p>
