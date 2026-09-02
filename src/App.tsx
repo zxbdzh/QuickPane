@@ -41,8 +41,10 @@ const EMPTY_SNAPSHOT: AppSnapshot = {
   },
   locked: false,
   firstRun: true,
+  hasPassword: false,
   windowVisible: true,
   pinnedExtensions: [],
+  recoveryMessage: null,
 };
 
 function App() {
@@ -96,6 +98,7 @@ function App() {
   useEffect(() => {
     void api.snapshot().then((next) => {
       setSnapshot(next);
+      setError(next.recoveryMessage ?? null);
       setReady(true);
       if (next.locked) setSection("lock");
       else if (next.firstRun) setSection("lock");

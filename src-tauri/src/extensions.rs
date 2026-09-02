@@ -7,6 +7,7 @@ use base64::Engine;
 use serde::Serialize;
 use sha2::{Digest, Sha256};
 use tauri::{AppHandle, Manager};
+use uuid::Uuid;
 
 use crate::browser::extensions_dir;
 
@@ -114,12 +115,14 @@ fn info_from_dir(path: &Path, enabled: bool) -> Option<ExtInfo> {
     if !path.is_dir() {
         return None;
     }
+    if is_reparse_or_link(path).ok()? {
+        return None;
+    }
     let manifest = read_manifest(path)?;
     let extension_id = compute_extension_id(path, &manifest);
     let id = path.file_name()?.to_string_lossy().to_string();
     Some(ExtInfo {
-        name: resolve_message(path, manifest.get("name")?.as_str()?)
-            .unwrap_or_else(|| id.clone()),
+        name: resolve_message(path, manifest.get("name")?.as_str()?).unwrap_or_else(|| id.clone()),
         version: manifest
             .get("version")
             .and_then(|v| v.as_str())
@@ -163,7 +166,11 @@ fn read_installed(dir: &Path, enabled: bool) -> Vec<ExtInfo> {
     let mut items = Vec::new();
     for entry in entries.flatten() {
         let path = entry.path();
-        if !path.is_dir() {
+        let internal = path
+            .file_name()
+            .and_then(|name| name.to_str())
+            .is_some_and(|name| name.starts_with('.'));
+        if internal || !path.is_dir() {
             continue;
         }
         if let Some(info) = info_from_dir(&path, enabled) {
@@ -178,27 +185,67 @@ fn read_manifest(dir: &Path) -> Option<serde_json::Value> {
     serde_json::from_str(&contents).ok()
 }
 
+/// 只接受 Chromium 支持的单段 locale 名称，避免把 manifest 值当作路径。
+fn is_safe_locale(locale: &str) -> bool {
+    !locale.is_empty()
+        && locale.len() <= 64
+        && locale
+            .chars()
+            .all(|c| c.is_ascii_alphanumeric() || matches!(c, '-' | '_'))
+}
+
+fn read_locale_messages(dir: &Path, locale: &str) -> Option<String> {
+    if !is_safe_locale(locale) {
+        return None;
+    }
+    let root = std::fs::canonicalize(dir).ok()?;
+    let candidate = dir.join("_locales").join(locale).join("messages.json");
+    let canonical = std::fs::canonicalize(&candidate).ok()?;
+    if !canonical.starts_with(&root) || is_reparse_or_link(&candidate).ok()? {
+        return None;
+    }
+    std::fs::read_to_string(canonical).ok()
+}
+
 /// 解析 manifest 字段的 `__MSG_key__` 国际化写法，非该格式时原样返回。
 fn resolve_message(dir: &Path, raw: &str) -> Option<String> {
-    let key = raw.strip_prefix("__MSG_").and_then(|rest| rest.strip_suffix("__"))?;
+    let Some(key) = raw
+        .strip_prefix("__MSG_")
+        .and_then(|rest| rest.strip_suffix("__"))
+    else {
+        return Some(raw.to_string());
+    };
     let manifest = read_manifest(dir)?;
     let locale = manifest
         .get("default_locale")
         .and_then(|v| v.as_str())
         .unwrap_or("en");
-    let messages = std::fs::read_to_string(
-        dir.join("_locales").join(locale).join("messages.json"),
-    )
-    .or_else(|_| {
-        std::fs::read_to_string(dir.join("_locales").join("en").join("messages.json"))
-    })
-    .ok()?;
+    let messages = read_locale_messages(dir, locale).or_else(|| read_locale_messages(dir, "en"))?;
     let parsed: serde_json::Value = serde_json::from_str(&messages).ok()?;
     parsed
         .get(key)
         .and_then(|entry| entry.get("message"))
         .and_then(|message| message.as_str())
         .map(str::to_string)
+}
+
+const MAX_ICON_BYTES: u64 = 2 * 1024 * 1024;
+const MAX_COPY_DEPTH: usize = 32;
+const MAX_COPY_FILES: usize = 10_000;
+const MAX_COPY_BYTES: u64 = 512 * 1024 * 1024;
+
+fn is_reparse_or_link(path: &Path) -> Result<bool, String> {
+    let metadata = std::fs::symlink_metadata(path).map_err(|error| error.to_string())?;
+    if metadata.file_type().is_symlink() {
+        return Ok(true);
+    }
+    #[cfg(windows)]
+    {
+        use std::os::windows::fs::MetadataExt;
+        return Ok(metadata.file_attributes() & 0x400 != 0);
+    }
+    #[cfg(not(windows))]
+    Ok(false)
 }
 
 fn manifest_icon(dir: &Path, manifest: &serde_json::Value) -> Option<String> {
@@ -208,9 +255,32 @@ fn manifest_icon(dir: &Path, manifest: &serde_json::Value) -> Option<String> {
         .find_map(|size| icons.get(*size))
         .or_else(|| icons.values().next())?
         .as_str()?;
+    let relative = relative.trim();
+    let relative_path = Path::new(relative);
+    if relative.is_empty()
+        || relative_path.is_absolute()
+        || relative_path
+            .components()
+            .any(|component| matches!(component, std::path::Component::ParentDir))
+    {
+        return None;
+    }
+    let root = std::fs::canonicalize(dir).ok()?;
     let icon_path = dir.join(relative);
-    let bytes = std::fs::read(&icon_path).ok()?;
-    let mime = match icon_path.extension()?.to_str()?.to_ascii_lowercase().as_str() {
+    if is_reparse_or_link(&icon_path).ok()? {
+        return None;
+    }
+    let canonical = std::fs::canonicalize(&icon_path).ok()?;
+    if !canonical.starts_with(&root) || std::fs::metadata(&canonical).ok()?.len() > MAX_ICON_BYTES {
+        return None;
+    }
+    let bytes = std::fs::read(&canonical).ok()?;
+    let mime = match icon_path
+        .extension()?
+        .to_str()?
+        .to_ascii_lowercase()
+        .as_str()
+    {
         "png" => "image/png",
         "jpg" | "jpeg" => "image/jpeg",
         "webp" => "image/webp",
@@ -222,17 +292,46 @@ fn manifest_icon(dir: &Path, manifest: &serde_json::Value) -> Option<String> {
 }
 
 fn copy_dir(source: &Path, target: &Path) -> Result<(), String> {
-    std::fs::create_dir_all(target).map_err(|error| error.to_string())?;
-    for entry in std::fs::read_dir(source).map_err(|error| error.to_string())?.flatten() {
-        let next_source = entry.path();
-        let next_target = target.join(entry.file_name());
-        if next_source.is_dir() {
-            copy_dir(&next_source, &next_target)?;
-        } else {
-            std::fs::copy(&next_source, &next_target).map_err(|error| error.to_string())?;
+    fn copy(
+        source: &Path,
+        target: &Path,
+        depth: usize,
+        files: &mut usize,
+        bytes: &mut u64,
+    ) -> Result<(), String> {
+        if depth > MAX_COPY_DEPTH || is_reparse_or_link(source)? {
+            return Err("扩展包含不受支持的链接或目录联接".into());
         }
+        std::fs::create_dir_all(target).map_err(|error| error.to_string())?;
+        for entry in std::fs::read_dir(source).map_err(|error| error.to_string())? {
+            let entry = entry.map_err(|error| error.to_string())?;
+            let next_source = entry.path();
+            let next_target = target.join(entry.file_name());
+            if is_reparse_or_link(&next_source)? {
+                return Err("扩展包含不受支持的链接或目录联接".into());
+            }
+            let metadata =
+                std::fs::symlink_metadata(&next_source).map_err(|error| error.to_string())?;
+            if metadata.is_dir() {
+                copy(&next_source, &next_target, depth + 1, files, bytes)?;
+            } else if metadata.is_file() {
+                *files += 1;
+                *bytes = bytes.saturating_add(metadata.len());
+                if *files > MAX_COPY_FILES || *bytes > MAX_COPY_BYTES {
+                    return Err("扩展文件数量或大小超出限制".into());
+                }
+                std::fs::copy(&next_source, &next_target).map_err(|error| error.to_string())?;
+            } else {
+                return Err("扩展包含不受支持的文件类型".into());
+            }
+        }
+        Ok(())
     }
-    Ok(())
+    let result = copy(source, target, 0, &mut 0, &mut 0);
+    if result.is_err() {
+        let _ = std::fs::remove_dir_all(target);
+    }
+    result
 }
 
 /// 校验并把选中的未打包扩展复制进扩展目录；不负责 WebView 重建。
@@ -241,23 +340,31 @@ pub fn install_from_folder(app: &AppHandle, folder: &Path) -> Result<Vec<ExtInfo
         return Err("所选文件夹不是有效的扩展：缺少 manifest.json".into());
     }
     let manifest = read_manifest(folder).ok_or("manifest.json 无法解析")?;
-    let id = manifest
-        .get("name")
-        .and_then(|v| v.as_str())
-        .filter(|name| sanitize_id(name).is_ok())
-        .map(str::to_string)
-        .unwrap_or_else(|| {
-            format!(
-                "ext-{}",
-                chrono::Utc::now().timestamp_millis().unsigned_abs()
-            )
-        });
+    let id = compute_extension_id(folder, &manifest);
 
     let target = ext_dir(app, &id)?;
-    if target.exists() {
-        std::fs::remove_dir_all(&target).map_err(|error| error.to_string())?;
+    let staging = target.with_file_name(format!(".{id}.installing-{}", Uuid::new_v4().simple()));
+    let backup = target.with_file_name(format!(".{id}.backup-{}", Uuid::new_v4().simple()));
+    let _ = std::fs::remove_dir_all(&staging);
+    copy_dir(folder, &staging)?;
+
+    let had_existing = target.exists();
+    if had_existing {
+        std::fs::rename(&target, &backup).map_err(|error| {
+            let _ = std::fs::remove_dir_all(&staging);
+            error.to_string()
+        })?;
     }
-    copy_dir(folder, &target)?;
+    if let Err(error) = std::fs::rename(&staging, &target) {
+        let _ = std::fs::remove_dir_all(&staging);
+        if had_existing {
+            let _ = std::fs::rename(&backup, &target);
+        }
+        return Err(error.to_string());
+    }
+    if had_existing {
+        let _ = std::fs::remove_dir_all(&backup);
+    }
     Ok(list(app))
 }
 
@@ -286,4 +393,20 @@ pub fn set_enabled(app: &AppHandle, id: &str, enabled: bool) -> Result<Vec<ExtIn
     }
     std::fs::rename(&from, &to).map_err(|error| error.to_string())?;
     Ok(list(app))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::is_safe_locale;
+
+    #[test]
+    fn locale_name_cannot_escape_extension_directory() {
+        assert!(is_safe_locale("en"));
+        assert!(is_safe_locale("zh_CN"));
+        assert!(is_safe_locale("en-US"));
+        assert!(!is_safe_locale("../secret"));
+        assert!(!is_safe_locale(r"..\secret"));
+        assert!(!is_safe_locale("C:\\secret"));
+        assert!(!is_safe_locale(""));
+    }
 }

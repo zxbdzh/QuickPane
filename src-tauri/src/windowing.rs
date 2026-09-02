@@ -145,11 +145,27 @@ pub fn show_window(app: &AppHandle) {
     };
     let was_visible = app
         .try_state::<AppState>()
-        .and_then(|state| state.inner.lock().ok().map(|runtime| runtime.window_visible))
+        .and_then(|state| {
+            state
+                .inner
+                .lock()
+                .ok()
+                .map(|runtime| runtime.window_visible)
+        })
         .unwrap_or(false);
     let shell_mode = app
         .try_state::<AppState>()
         .and_then(|state| state.inner.lock().ok().map(|runtime| runtime.shell_mode))
+        .unwrap_or(true);
+    let locked = app
+        .try_state::<AppState>()
+        .and_then(|state| {
+            state
+                .inner
+                .lock()
+                .ok()
+                .map(|runtime| runtime.locked || runtime.first_run)
+        })
         .unwrap_or(true);
     let previous = capture_foreground_window(window.hwnd().ok().map(|value| value.0 as isize));
     if let Some(state) = app.try_state::<AppState>() {
@@ -163,9 +179,15 @@ pub fn show_window(app: &AppHandle) {
     let _ = window.show();
     let _ = window.unminimize();
     force_foreground(&window);
-    set_all_muted(app, false);
-    show_active_tab(app);
-    if !was_visible && shell_mode {
+    if locked {
+        // 锁屏界面可见时，后台标签仍必须保持静音。
+        hide_all_tabs(app);
+        set_all_muted(app, true);
+    } else {
+        set_all_muted(app, false);
+        show_active_tab(app);
+    }
+    if !was_visible && shell_mode && !locked {
         // 仅壳层页面需要地址栏焦点；浏览页面时由 show_active_tab 聚焦子 WebView。
         if let Some(webview) = app.get_webview("main") {
             let _ = webview.set_focus();
@@ -180,10 +202,7 @@ pub fn lock_app(app: &AppHandle) {
         let should_lock = state
             .inner
             .lock()
-            .map(|runtime| {
-                runtime.data.settings.lock_on_system_lock
-                    && runtime.data.settings.password_hash.is_some()
-            })
+            .map(|runtime| runtime.data.settings.password_hash.is_some())
             .unwrap_or(false);
         if should_lock {
             let _ = state.mutate(|runtime| {
@@ -191,9 +210,32 @@ pub fn lock_app(app: &AppHandle) {
                 runtime.shell_mode = true;
             });
             hide_all_tabs(app);
+            set_all_muted(app, true);
+            if let Some(menu) = app.get_webview_window("menu") {
+                let _ = menu.hide();
+            }
+            if let Some(popup) = app.get_webview_window("extension-popup") {
+                let _ = popup.hide();
+            }
             let _ = app.emit("open-section", "lock");
             emit_snapshot(app);
         }
+    }
+}
+
+pub fn lock_on_system_lock(app: &AppHandle) {
+    let enabled = app
+        .try_state::<AppState>()
+        .and_then(|state| {
+            state
+                .inner
+                .lock()
+                .ok()
+                .map(|runtime| runtime.data.settings.lock_on_system_lock)
+        })
+        .unwrap_or(false);
+    if enabled {
+        lock_app(app);
     }
 }
 
@@ -225,7 +267,7 @@ pub fn install_session_lock_listener(app: &AppHandle) -> Result<(), String> {
     ) -> LRESULT {
         if msg == WM_WTSSESSION_CHANGE && wparam.0 as u32 == 0x7 {
             if let Some(app) = APP_HANDLE.get() {
-                lock_app(app);
+                lock_on_system_lock(app);
             }
         }
         let previous = PREVIOUS_PROC.get().copied().unwrap_or_default();
@@ -284,7 +326,9 @@ fn restore_foreground_window(hwnd: isize) {
     }
     use windows::Win32::{
         Foundation::HWND,
-        UI::WindowsAndMessaging::{IsIconic, IsWindow, SetForegroundWindow, ShowWindow, SW_RESTORE},
+        UI::WindowsAndMessaging::{
+            IsIconic, IsWindow, SetForegroundWindow, ShowWindow, SW_RESTORE,
+        },
     };
     let native = HWND(hwnd as *mut _);
     unsafe {

@@ -58,17 +58,20 @@ function makeSnapshot(): AppSnapshot {
       ],
       bookmarks: [],
       downloads: DOWNLOADS,
-      settings: { ...DEFAULT_SETTINGS, passwordHash: bootLocked ? "mock-hash" : null },
+      settings: { ...DEFAULT_SETTINGS, passwordHash: null },
     },
     locked: bootLocked,
     firstRun: false,
+    hasPassword: bootLocked,
     windowVisible: true,
     pinnedExtensions: [],
+    recoveryMessage: null,
   };
 }
 
 let snapshot = makeSnapshot();
 let mockPassword: string | null = null;
+if (new URLSearchParams(window.location.search).get("locked") === "1") mockPassword = "password";
 let eventSeq = 1;
 
 function emitEvent(name: string, payload: unknown) {
@@ -227,13 +230,17 @@ async function invoke(command: string, args: Record<string, unknown> = {}): Prom
       return structuredClone(snapshot);
     case "set_app_password": {
       mockPassword = args.newPassword as string;
-      snapshot.data.settings.passwordHash = "mock-argon2-hash";
+      snapshot.hasPassword = true;
+      snapshot.locked = false;
+      snapshot.firstRun = false;
+      snapshot.data.settings.passwordHash = null;
       emitSnapshot();
       return structuredClone(snapshot);
     }
     case "disable_app_password": {
       if (args.currentPassword !== mockPassword) throw new Error("密码错误");
       mockPassword = null;
+      snapshot.hasPassword = false;
       snapshot.data.settings.passwordHash = null;
       emitSnapshot();
       return structuredClone(snapshot);
@@ -241,6 +248,8 @@ async function invoke(command: string, args: Record<string, unknown> = {}): Prom
     case "unlock_app": {
       if ((args.password as string) !== mockPassword) throw new Error("应用密码错误");
       snapshot.locked = false;
+      snapshot.firstRun = false;
+      snapshot.hasPassword = true;
       emitSnapshot();
       return structuredClone(snapshot);
     }

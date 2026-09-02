@@ -160,12 +160,12 @@ pub struct AppSnapshot {
     pub data: PersistedData,
     pub locked: bool,
     pub first_run: bool,
+    pub has_password: bool,
     pub window_visible: bool,
     /// 固定到导航栏的扩展（从磁盘实时解析，随快照事件刷新）。
     pub pinned_extensions: Vec<ExtInfo>,
+    pub recovery_message: Option<String>,
 }
-
-#[derive(Debug)]
 pub struct RuntimeData {
     pub data: PersistedData,
     pub locked: bool,
@@ -179,6 +179,7 @@ pub struct RuntimeData {
 pub struct AppState {
     pub inner: Mutex<RuntimeData>,
     path: PathBuf,
+    recovery_message: Option<String>,
 }
 
 impl AppState {
@@ -190,9 +191,24 @@ impl AppState {
         fs::create_dir_all(&data_dir).map_err(|error| error.to_string())?;
         let path = data_dir.join("quickpane.json");
         let existed = path.exists();
+        let mut recovery_message = None;
         let mut data = if existed {
             let contents = fs::read_to_string(&path).map_err(|error| error.to_string())?;
-            serde_json::from_str::<PersistedData>(&contents).unwrap_or_default()
+            match serde_json::from_str::<PersistedData>(&contents) {
+                Ok(data) => data,
+                Err(_error) => {
+                    let backup = path.with_file_name(format!(
+                        "quickpane.json.{}.corrupt",
+                        Utc::now().format("%Y%m%d%H%M%S")
+                    ));
+                    fs::rename(&path, &backup).map_err(|rename_error| rename_error.to_string())?;
+                    recovery_message = Some(format!(
+                        "状态文件损坏，已备份为 {}，已使用默认状态启动。",
+                        backup.display()
+                    ));
+                    PersistedData::default()
+                }
+            }
         } else {
             PersistedData::default()
         };
@@ -203,13 +219,14 @@ impl AppState {
             inner: Mutex::new(RuntimeData {
                 data,
                 locked,
-                first_run: !existed,
+                first_run: !existed || recovery_message.is_some(),
                 window_visible: true,
                 quitting: false,
                 shell_mode: true,
                 previous_window: 0,
             }),
             path,
+            recovery_message,
         };
         state.save()?;
         Ok(state)
@@ -245,16 +262,33 @@ impl AppState {
 
     pub fn snapshot(&self) -> AppSnapshot {
         let guard = self.inner.lock().expect("app state poisoned");
-        let data_dir = self.path.parent().map(Path::to_path_buf).unwrap_or_default();
+        let has_password = guard.data.settings.password_hash.is_some();
+        let data_dir = self
+            .path
+            .parent()
+            .map(Path::to_path_buf)
+            .unwrap_or_default();
+        let locked = guard.locked || guard.first_run;
+        let mut data = if locked {
+            // 锁屏快照只保留空壳，避免通过 IPC 泄露历史、网址、下载路径或密码哈希。
+            PersistedData::default()
+        } else {
+            guard.data.clone()
+        };
+        // 前端只需要 hasPassword；不要把可用于离线破解的 Argon2 哈希发送到 IPC 消费者。
+        data.settings.password_hash = None;
         AppSnapshot {
-            data: guard.data.clone(),
+            data,
             locked: guard.locked,
             first_run: guard.first_run,
+            has_password,
             window_visible: guard.window_visible,
-            pinned_extensions: extensions::pinned_infos(
-                &data_dir,
-                &guard.data.settings.pinned_extensions,
-            ),
+            pinned_extensions: if locked {
+                Vec::new()
+            } else {
+                extensions::pinned_infos(&data_dir, &guard.data.settings.pinned_extensions)
+            },
+            recovery_message: self.recovery_message.clone(),
         }
     }
 
@@ -317,10 +351,33 @@ fn atomic_write_json(path: &Path, data: &PersistedData) -> Result<(), String> {
     let temp = path.with_extension("json.tmp");
     let serialized = serde_json::to_vec_pretty(data).map_err(|error| error.to_string())?;
     fs::write(&temp, serialized).map_err(|error| error.to_string())?;
-    if path.exists() {
-        fs::remove_file(path).map_err(|error| error.to_string())?;
+
+    if !path.exists() {
+        return fs::rename(&temp, path).map_err(|error| error.to_string());
     }
-    fs::rename(temp, path).map_err(|error| error.to_string())
+
+    #[cfg(windows)]
+    {
+        use std::{ffi::OsStr, os::windows::ffi::OsStrExt};
+        use windows::{core::PCWSTR, Win32::Storage::FileSystem::ReplaceFileW};
+        let existing: Vec<u16> = OsStr::new(path).encode_wide().chain(Some(0)).collect();
+        let replacement: Vec<u16> = OsStr::new(&temp).encode_wide().chain(Some(0)).collect();
+        unsafe {
+            ReplaceFileW(
+                PCWSTR(existing.as_ptr()),
+                PCWSTR(replacement.as_ptr()),
+                PCWSTR::null(),
+                windows::Win32::Storage::FileSystem::REPLACE_FILE_FLAGS(0),
+                None,
+                None,
+            )
+            .map_err(|error| error.to_string())?;
+        }
+        return Ok(());
+    }
+
+    #[cfg(not(windows))]
+    fs::rename(&temp, path).map_err(|error| error.to_string())
 }
 
 pub fn display_title_from_url(url: &str) -> String {
@@ -344,6 +401,30 @@ mod tests {
             data.active_tab_id.as_deref(),
             Some(data.tabs[0].id.as_str())
         );
+    }
+
+    #[test]
+    fn snapshot_never_exposes_password_hash() {
+        let hash = AppState::hash_password("correct horse").expect("hash password");
+        let mut data = PersistedData::default();
+        data.settings.password_hash = Some(hash);
+        let state = AppState {
+            inner: Mutex::new(RuntimeData {
+                data,
+                locked: false,
+                first_run: false,
+                window_visible: true,
+                quitting: false,
+                shell_mode: true,
+                previous_window: 0,
+            }),
+            path: PathBuf::from("quickpane-test.json"),
+            recovery_message: None,
+        };
+
+        let snapshot = state.snapshot();
+        assert!(snapshot.has_password);
+        assert!(snapshot.data.settings.password_hash.is_none());
     }
 
     #[test]

@@ -22,7 +22,7 @@ function MenuWindow() {
     document.body.style.background = "transparent";
     void api
       .snapshot()
-      .then((snapshot) => setHasPassword(Boolean(snapshot.data.settings.passwordHash)))
+      .then((snapshot) => setHasPassword(snapshot.hasPassword))
       .catch(() => {});
   }, []);
 

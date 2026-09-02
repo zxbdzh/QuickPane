@@ -27,7 +27,16 @@ function TabStrip({ tabs, activeId, onSelect, onClose, onNew }: {
           return (
             <ContextMenu key={tab.id}>
               <ContextMenuTrigger asChild>
-                <button
+                <div
+                  tabIndex={0}
+                  role="button"
+                  onKeyDown={(event) => {
+                    if (event.target !== event.currentTarget) return;
+                    if (event.key === "Enter" || event.key === " ") {
+                      event.preventDefault();
+                      onSelect(tab);
+                    }
+                  }}
                   onClick={() => onSelect(tab)}
                   aria-label={active ? `${tab.title || "新标签页"}（当前标签页）` : `切换到 ${tab.title || "新标签页"}`}
                   className={cn(
@@ -42,17 +51,10 @@ function TabStrip({ tabs, activeId, onSelect, onClose, onNew }: {
                     <Globe2 className="size-3.5 shrink-0" />
                   )}
                   <span className="truncate text-left">{tab.title || "新标签页"}</span>
-                  <span
-                    role="button"
-                    tabIndex={0}
+                  <button
+                    type="button"
                     aria-label={`关闭 ${tab.title || "新标签页"}`}
                     onClick={(event) => { event.stopPropagation(); onClose(tab.id); }}
-                    onKeyDown={(event) => {
-                      if (event.key === "Enter" || event.key === " ") {
-                        event.stopPropagation();
-                        onClose(tab.id);
-                      }
-                    }}
                     className={cn(
                       "grid size-[18px] place-items-center rounded-full transition-opacity hover:bg-foreground/10 focus-visible:opacity-100 focus-visible:ring-[3px] focus-visible:ring-ring/50",
                       active
@@ -61,11 +63,11 @@ function TabStrip({ tabs, activeId, onSelect, onClose, onNew }: {
                     )}
                   >
                     <X className="size-3" />
-                  </span>
+                  </button>
                   {active ? (
                     <i aria-hidden className="absolute inset-x-2.5 bottom-0 h-0.5 rounded-full bg-primary" />
                   ) : null}
-                </button>
+                </div>
               </ContextMenuTrigger>
               <ContextMenuContent>
                 <ContextMenuItem onSelect={() => onSelect(tab)}>

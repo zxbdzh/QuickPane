@@ -81,8 +81,10 @@ export type AppSnapshot = {
   data: PersistedData;
   locked: boolean;
   firstRun: boolean;
+  hasPassword: boolean;
   windowVisible: boolean;
   pinnedExtensions: BrowserExtension[];
+  recoveryMessage: string | null;
 };
 
 export type ShellSection =

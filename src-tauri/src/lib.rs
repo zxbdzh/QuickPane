@@ -9,7 +9,7 @@ use std::time::Duration;
 use browser::{
     activate_tab, browser_data_dir, close_tab, create_tab, emit_snapshot, ensure_tab_webview,
     eval_active, extensions_dir, freeze_idle_tabs, navigate_tab, proxy_browser_args,
-    recreate_tab_webviews, reload_active, resize_tabs, set_shell_mode, set_zoom,
+    recreate_tab_webviews, reload_active, resize_tabs, set_all_muted, set_shell_mode, set_zoom,
 };
 use chrono::Utc;
 use serde::Deserialize;
@@ -31,47 +31,70 @@ fn get_snapshot(state: tauri::State<'_, AppState>) -> AppSnapshot {
     state.snapshot()
 }
 
+fn require_unlocked(app: &AppHandle) -> Result<(), String> {
+    let state = app
+        .try_state::<AppState>()
+        .ok_or_else(|| "应用状态不可用".to_string())?;
+    let runtime = state
+        .inner
+        .lock()
+        .map_err(|_| "应用状态无法读取".to_string())?;
+    if runtime.locked || runtime.first_run {
+        Err("请先解锁 QuickPane".into())
+    } else {
+        Ok(())
+    }
+}
+
 #[tauri::command]
 async fn new_tab(
     app: AppHandle,
     url: Option<String>,
     activate: Option<bool>,
 ) -> Result<AppSnapshot, String> {
+    require_unlocked(&app)?;
     create_tab(&app, url, activate.unwrap_or(true))
 }
 
 #[tauri::command]
 async fn select_tab(app: AppHandle, tab_id: String) -> Result<AppSnapshot, String> {
+    require_unlocked(&app)?;
     activate_tab(&app, &tab_id).await
 }
 
 #[tauri::command]
 async fn remove_tab(app: AppHandle, tab_id: String) -> Result<AppSnapshot, String> {
+    require_unlocked(&app)?;
     close_tab(&app, &tab_id).await
 }
 
 #[tauri::command]
 async fn navigate(app: AppHandle, tab_id: String, input: String) -> Result<AppSnapshot, String> {
+    require_unlocked(&app)?;
     navigate_tab(&app, &tab_id, &input).await
 }
 
 #[tauri::command]
 fn reload(app: AppHandle) -> Result<(), String> {
+    require_unlocked(&app)?;
     reload_active(&app)
 }
 
 #[tauri::command]
 fn go_back(app: AppHandle) -> Result<(), String> {
+    require_unlocked(&app)?;
     eval_active(&app, "history.back()")
 }
 
 #[tauri::command]
 fn go_forward(app: AppHandle) -> Result<(), String> {
+    require_unlocked(&app)?;
     eval_active(&app, "history.forward()")
 }
 
 #[tauri::command]
 fn find_in_page(app: AppHandle) -> Result<(), String> {
+    require_unlocked(&app)?;
     eval_active(
         &app,
         "window.find(prompt('在页面中查找') || '', false, false, true)",
@@ -80,22 +103,28 @@ fn find_in_page(app: AppHandle) -> Result<(), String> {
 
 #[tauri::command]
 fn zoom_page(app: AppHandle, scale: f64) -> Result<(), String> {
+    require_unlocked(&app)?;
     set_zoom(&app, scale)
 }
 
 #[tauri::command]
 fn show_shell(app: AppHandle, visible: bool) -> Result<AppSnapshot, String> {
+    require_unlocked(&app)?;
     set_shell_mode(&app, visible)
 }
 
 #[tauri::command]
-fn hide_to_tray(app: AppHandle) {
+fn hide_to_tray(app: AppHandle) -> Result<(), String> {
+    require_unlocked(&app)?;
     hide_window(&app);
+    Ok(())
 }
 
 #[tauri::command]
-fn show_from_tray(app: AppHandle) {
+fn show_from_tray(app: AppHandle) -> Result<(), String> {
+    require_unlocked(&app)?;
     show_window(&app);
+    Ok(())
 }
 
 #[tauri::command]
@@ -109,6 +138,7 @@ fn set_global_shortcut(
     state: tauri::State<'_, AppState>,
     shortcut: String,
 ) -> Result<AppSnapshot, String> {
+    require_unlocked(&app)?;
     let previous = state
         .inner
         .lock()
@@ -144,24 +174,24 @@ struct SettingsUpdate {
 /// --proxy-server 接受 `scheme://host:port` 或裸 `host:port`。
 fn validate_proxy_url(value: &str) -> Result<(), String> {
     let trimmed = value.trim();
-    if let Ok(url) = Url::parse(trimmed) {
-        let scheme = url.scheme();
-        if matches!(scheme, "http" | "https" | "socks4" | "socks5") && url.host_str().is_some() {
-            return Ok(());
-        }
-        return Err("代理地址仅支持 http/https/socks4/socks5".into());
+    if trimmed.is_empty() || trimmed.chars().any(|c| c.is_whitespace() || c.is_control()) {
+        return Err("代理地址格式无效".into());
     }
-    let without_scheme = trimmed.split_once("://").map_or(trimmed, |(_, rest)| rest);
-    let host_part = without_scheme
-        .rsplit('@')
-        .next()
-        .unwrap_or_default()
-        .split(['/', '?'])
-        .next()
-        .unwrap_or_default();
-    let (host, port) = host_part.rsplit_once(':').ok_or("代理地址格式无效")?;
-    if host.is_empty() || port.parse::<u16>().is_err() {
-        return Err("代理地址格式无效，示例：http://127.0.0.1:7890".into());
+    let normalized = if trimmed.contains("://") {
+        trimmed.to_string()
+    } else {
+        format!("http://{trimmed}")
+    };
+    let url = Url::parse(&normalized)
+        .map_err(|_| "代理地址格式无效，示例：http://127.0.0.1:7890".to_string())?;
+    if !matches!(url.scheme(), "http" | "https" | "socks4" | "socks5")
+        || url.host_str().is_none()
+        || url.path() != "/"
+        || url.query().is_some()
+        || url.fragment().is_some()
+        || url.port().is_none()
+    {
+        return Err("代理地址仅支持 scheme://host:port 格式".into());
     }
     Ok(())
 }
@@ -172,6 +202,7 @@ async fn update_settings(
     state: tauri::State<'_, AppState>,
     update: SettingsUpdate,
 ) -> Result<AppSnapshot, String> {
+    require_unlocked(&app)?;
     if !update.home_url.starts_with("http://") && !update.home_url.starts_with("https://") {
         return Err("主页必须是 HTTP 或 HTTPS 地址".into());
     }
@@ -237,8 +268,9 @@ async fn update_settings(
 }
 
 #[tauri::command]
-fn list_extensions(app: AppHandle) -> Vec<extensions::ExtInfo> {
-    extensions::list(&app)
+fn list_extensions(app: AppHandle) -> Result<Vec<extensions::ExtInfo>, String> {
+    require_unlocked(&app)?;
+    Ok(extensions::list(&app))
 }
 
 /// 菜单用独立置顶子窗口承载：主 WebView 里的 HTML 浮层会被标签 WebView 盖住。
@@ -247,6 +279,7 @@ fn list_extensions(app: AppHandle) -> Vec<extensions::ExtInfo> {
 /// （create_tab 等异步命令创建的 WebView 均正常，见 docs/extensions.md 同类经验）。
 #[tauri::command]
 async fn show_menu_window(app: AppHandle, x: f64, y: f64) -> Result<(), String> {
+    require_unlocked(&app)?;
     let main = app
         .get_window("main")
         .ok_or_else(|| "主窗口不存在".to_string())?;
@@ -263,23 +296,20 @@ async fn show_menu_window(app: AppHandle, x: f64, y: f64) -> Result<(), String> 
         let _ = menu.set_focus();
         return Ok(());
     }
-    let menu = tauri::WebviewWindowBuilder::new(
-        &app,
-        "menu",
-        tauri::WebviewUrl::App("index.html".into()),
-    )
-    .title("QuickPane 菜单")
-    .inner_size(250.0, 300.0)
-    .position(position.x, position.y)
-    .decorations(false)
-    .transparent(true)
-    .always_on_top(true)
-    .skip_taskbar(true)
-    .resizable(false)
-    .shadow(false)
-    .focused(true)
-    .build()
-    .map_err(|error| error.to_string())?;
+    let menu =
+        tauri::WebviewWindowBuilder::new(&app, "menu", tauri::WebviewUrl::App("index.html".into()))
+            .title("QuickPane 菜单")
+            .inner_size(250.0, 300.0)
+            .position(position.x, position.y)
+            .decorations(false)
+            .transparent(true)
+            .always_on_top(true)
+            .skip_taskbar(true)
+            .resizable(false)
+            .shadow(false)
+            .focused(true)
+            .build()
+            .map_err(|error| error.to_string())?;
     // 创建后显式抢焦点：菜单内容加载期间焦点可能被主窗口的 WebView 抢回。
     let _ = menu.set_focus();
     Ok(())
@@ -287,6 +317,7 @@ async fn show_menu_window(app: AppHandle, x: f64, y: f64) -> Result<(), String> 
 
 #[tauri::command]
 async fn install_extension(app: AppHandle) -> Result<Vec<extensions::ExtInfo>, String> {
+    require_unlocked(&app)?;
     let folder = app
         .dialog()
         .file()
@@ -296,7 +327,9 @@ async fn install_extension(app: AppHandle) -> Result<Vec<extensions::ExtInfo>, S
     let Some(folder) = folder else {
         return Ok(extensions::list(&app));
     };
+    require_unlocked(&app)?;
     let items = extensions::install_from_folder(&app, &folder)?;
+    require_unlocked(&app)?;
     recreate_tab_webviews(&app).await?;
     Ok(items)
 }
@@ -306,7 +339,9 @@ async fn remove_extension(
     app: AppHandle,
     extension_id: String,
 ) -> Result<Vec<extensions::ExtInfo>, String> {
+    require_unlocked(&app)?;
     let items = extensions::remove(&app, &extension_id)?;
+    require_unlocked(&app)?;
     recreate_tab_webviews(&app).await?;
     Ok(items)
 }
@@ -317,7 +352,9 @@ async fn set_extension_enabled(
     extension_id: String,
     enabled: bool,
 ) -> Result<Vec<extensions::ExtInfo>, String> {
+    require_unlocked(&app)?;
     let items = extensions::set_enabled(&app, &extension_id, enabled)?;
+    require_unlocked(&app)?;
     recreate_tab_webviews(&app).await?;
     Ok(items)
 }
@@ -336,6 +373,7 @@ async fn show_extension_popup(
     x: Option<f64>,
     y: Option<f64>,
 ) -> Result<(), String> {
+    require_unlocked(&app)?;
     let parsed = Url::parse(&url).map_err(|_| "扩展面板地址无效".to_string())?;
     if parsed.scheme() != "chrome-extension" {
         return Err("仅支持扩展面板地址".into());
@@ -366,7 +404,9 @@ async fn show_extension_popup(
     };
 
     if let Some(popup) = app.get_webview_window("extension-popup") {
-        *EXTENSION_POPUP_SHOWN_AT.lock().expect("popup state poisoned") = Some(std::time::Instant::now());
+        *EXTENSION_POPUP_SHOWN_AT
+            .lock()
+            .expect("popup state poisoned") = Some(std::time::Instant::now());
         popup.navigate(parsed).map_err(|error| error.to_string())?;
         let _ = popup.set_position(position);
         let _ = popup.show();
@@ -381,28 +421,36 @@ async fn show_extension_popup(
         let guard = state.inner.lock().map_err(|_| "应用状态无法读取")?;
         (
             browser_data_dir(&app)?,
-            proxy_browser_args(&guard.data.settings.proxy_mode, &guard.data.settings.proxy_url),
+            proxy_browser_args(
+                &guard.data.settings.proxy_mode,
+                &guard.data.settings.proxy_url,
+            ),
         )
     };
 
-    let mut builder =
-        tauri::WebviewWindowBuilder::new(&app, "extension-popup", tauri::WebviewUrl::External(parsed))
-            .title("扩展面板")
-            .inner_size(400.0, 620.0)
-            .position(position.x, position.y)
-            .decorations(false)
-            .always_on_top(true)
-            .skip_taskbar(true)
-            .resizable(false)
-            .focused(true)
-            .data_directory(data_dir)
-            .browser_extensions_enabled(true)
-            .extensions_path(extensions_dir(&app));
+    let mut builder = tauri::WebviewWindowBuilder::new(
+        &app,
+        "extension-popup",
+        tauri::WebviewUrl::External(parsed),
+    )
+    .title("扩展面板")
+    .inner_size(400.0, 620.0)
+    .position(position.x, position.y)
+    .decorations(false)
+    .always_on_top(true)
+    .skip_taskbar(true)
+    .resizable(false)
+    .focused(true)
+    .data_directory(data_dir)
+    .browser_extensions_enabled(true)
+    .extensions_path(extensions_dir(&app));
     if let Some(args) = &proxy_args {
         builder = builder.additional_browser_args(args);
     }
     let popup = builder.build().map_err(|error| error.to_string())?;
-    *EXTENSION_POPUP_SHOWN_AT.lock().expect("popup state poisoned") = Some(std::time::Instant::now());
+    *EXTENSION_POPUP_SHOWN_AT
+        .lock()
+        .expect("popup state poisoned") = Some(std::time::Instant::now());
     let _ = popup.set_focus();
     Ok(())
 }
@@ -415,6 +463,7 @@ fn toggle_extension_pin(
     extension_id: String,
     pinned: bool,
 ) -> Result<AppSnapshot, String> {
+    require_unlocked(&app)?;
     extensions::check_id(&extension_id)?;
     state.mutate(|runtime| {
         let pins = &mut runtime.data.settings.pinned_extensions;
@@ -447,12 +496,14 @@ async fn check_update(
     app: AppHandle,
     state: tauri::State<'_, UpdateState>,
 ) -> Result<Option<UpdateInfo>, String> {
+    require_unlocked(&app)?;
     let update = app
         .updater()
         .map_err(|error| error.to_string())?
         .check()
         .await
         .map_err(|error| error.to_string())?;
+    require_unlocked(&app)?;
     Ok(match update {
         Some(update) => {
             let info = UpdateInfo {
@@ -460,13 +511,13 @@ async fn check_update(
                 notes: update.body.clone(),
                 pub_date: update.date.map(|date| date.to_string()),
             };
-                *state.0.lock().map_err(|_| "更新状态异常".to_string())? = Some(update);
+            *state.0.lock().map_err(|_| "更新状态异常".to_string())? = Some(update);
             Some(info)
         }
         None => {
             *state.0.lock().map_err(|_| "更新状态异常".to_string())? = None;
             None
-        },
+        }
     })
 }
 
@@ -476,17 +527,20 @@ async fn install_update(
     app: AppHandle,
     state: tauri::State<'_, UpdateState>,
 ) -> Result<(), String> {
+    require_unlocked(&app)?;
     let update = state
         .0
         .lock()
         .map_err(|_| "更新状态异常".to_string())?
         .clone()
         .ok_or_else(|| "没有待安装的更新，请先检查更新".to_string())?;
+    require_unlocked(&app)?;
     let downloaded = AtomicU64::new(0);
     update
         .download_and_install(
             |chunk, total| {
-                let downloaded = downloaded.fetch_add(chunk as u64, Ordering::Relaxed) + chunk as u64;
+                let downloaded =
+                    downloaded.fetch_add(chunk as u64, Ordering::Relaxed) + chunk as u64;
                 let _ = app.emit(
                     "update-progress",
                     serde_json::json!({ "downloaded": downloaded, "total": total }),
@@ -506,6 +560,7 @@ fn add_bookmark(
     title: String,
     url: String,
 ) -> Result<AppSnapshot, String> {
+    require_unlocked(&app)?;
     if !url.starts_with("http://") && !url.starts_with("https://") {
         return Err("只能收藏网页地址".into());
     }
@@ -539,6 +594,7 @@ fn remove_bookmark(
     state: tauri::State<'_, AppState>,
     bookmark_id: String,
 ) -> Result<AppSnapshot, String> {
+    require_unlocked(&app)?;
     state.mutate(|runtime| runtime.data.bookmarks.retain(|item| item.id != bookmark_id))?;
     emit_snapshot(&app);
     Ok(state.snapshot())
@@ -546,6 +602,7 @@ fn remove_bookmark(
 
 #[tauri::command]
 fn clear_history(app: AppHandle, state: tauri::State<'_, AppState>) -> Result<AppSnapshot, String> {
+    require_unlocked(&app)?;
     state.mutate(|runtime| runtime.data.history.clear())?;
     emit_snapshot(&app);
     Ok(state.snapshot())
@@ -556,6 +613,7 @@ fn clear_downloads(
     app: AppHandle,
     state: tauri::State<'_, AppState>,
 ) -> Result<AppSnapshot, String> {
+    require_unlocked(&app)?;
     state.mutate(|runtime| runtime.data.downloads.clear())?;
     emit_snapshot(&app);
     Ok(state.snapshot())
@@ -563,6 +621,7 @@ fn clear_downloads(
 
 #[tauri::command]
 fn open_download(app: AppHandle, path: String) -> Result<(), String> {
+    require_unlocked(&app)?;
     app.opener()
         .open_path(path, None::<&str>)
         .map_err(|error| error.to_string())
@@ -570,6 +629,7 @@ fn open_download(app: AppHandle, path: String) -> Result<(), String> {
 
 #[tauri::command]
 fn clear_site_data(app: AppHandle) -> Result<(), String> {
+    require_unlocked(&app)?;
     if let Some(webview) = app
         .webviews()
         .values()
@@ -589,14 +649,20 @@ fn set_app_password(
     current_password: Option<String>,
     new_password: String,
 ) -> Result<AppSnapshot, String> {
-    let has_password = state
-        .inner
-        .lock()
-        .map_err(|_| "应用状态无法读取".to_string())?
-        .data
-        .settings
-        .password_hash
-        .is_some();
+    let (has_password, first_run) = {
+        let runtime = state
+            .inner
+            .lock()
+            .map_err(|_| "应用状态无法读取".to_string())?;
+        (
+            runtime.data.settings.password_hash.is_some(),
+            runtime.first_run,
+        )
+    };
+    // 首次设置时应用尚未解锁，这是唯一允许写入密码的锁定状态。
+    if !first_run {
+        require_unlocked(&app)?;
+    }
     if has_password
         && current_password
             .as_deref()
@@ -620,6 +686,7 @@ fn disable_app_password(
     state: tauri::State<'_, AppState>,
     current_password: String,
 ) -> Result<AppSnapshot, String> {
+    require_unlocked(&app)?;
     if !state.verify_password(&current_password) {
         return Err("当前应用密码不正确".into());
     }
@@ -654,6 +721,8 @@ async fn unlock_app(
     if let Some(id) = active {
         ensure_tab_webview(&app, &id)?;
     }
+    // 解锁后恢复锁定前未静音的媒体；锁定期间不会因显示窗口而提前解除静音。
+    set_all_muted(&app, false);
     browser::show_active_tab(&app);
     emit_snapshot(&app);
     Ok(state.snapshot())
@@ -665,9 +734,13 @@ fn skip_password_setup(
     state: tauri::State<'_, AppState>,
 ) -> Result<AppSnapshot, String> {
     state.mutate(|runtime| {
+        if !runtime.first_run || runtime.data.settings.password_hash.is_some() {
+            return Err("仅首次运行时可以跳过密码设置".into());
+        }
         runtime.first_run = false;
         runtime.locked = false;
-    })?;
+        Ok::<(), String>(())
+    })??;
     emit_snapshot(&app);
     Ok(state.snapshot())
 }
@@ -776,7 +849,7 @@ pub fn run() {
                     .lock()
                     .map(|runtime| runtime.quitting)
                     .unwrap_or(false);
-                if !quitting {
+                if !quitting && window.label() == "main" {
                     api.prevent_close();
                     hide_window(window.app_handle());
                 }

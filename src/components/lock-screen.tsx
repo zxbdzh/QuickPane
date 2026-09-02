@@ -18,7 +18,7 @@ function LockScreen({ snapshot, applySnapshot, run }: {
   const [confirm, setConfirm] = useState("");
   const [reveal, setReveal] = useState(false);
   const shakeControls = useAnimationControls();
-  const hasPassword = Boolean(snapshot.data.settings.passwordHash);
+  const hasPassword = snapshot.hasPassword;
   const firstSetup = snapshot.firstRun && !hasPassword;
 
   const shake = useCallback(() => {
@@ -66,7 +66,9 @@ function LockScreen({ snapshot, applySnapshot, run }: {
           </p>
           <form className="flex flex-col gap-2.5" onSubmit={submit}>
             <div className="relative">
+              <label htmlFor="lock-password" className="sr-only">{firstSetup ? "设置应用密码" : "应用密码"}</label>
               <Input
+                id="lock-password"
                 autoFocus
                 type={reveal ? "text" : "password"}
                 value={password}
@@ -84,13 +86,17 @@ function LockScreen({ snapshot, applySnapshot, run }: {
               </button>
             </div>
             {firstSetup ? (
-              <Input
-                type={reveal ? "text" : "password"}
-                value={confirm}
-                onChange={(event) => setConfirm(event.target.value)}
-                placeholder="再次输入密码"
-                className="h-10 bg-surface"
-              />
+              <div>
+                <label htmlFor="lock-confirm" className="sr-only">再次输入密码</label>
+                <Input
+                  id="lock-confirm"
+                  type={reveal ? "text" : "password"}
+                  value={confirm}
+                  onChange={(event) => setConfirm(event.target.value)}
+                  placeholder="再次输入密码"
+                  className="h-10 bg-surface"
+                />
+              </div>
             ) : null}
             {firstSetup && confirm && password !== confirm ? (
               <p className="text-left text-xs text-destructive">两次输入的密码不一致</p>

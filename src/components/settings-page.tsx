@@ -29,6 +29,7 @@ function SettingsPage({ snapshot, applySnapshot, run }: {
   run: <T>(action: () => Promise<T>) => Promise<T | undefined>;
 }) {
   const settings = snapshot.data.settings;
+  const hasPassword = snapshot.hasPassword;
   const [theme, setTheme] = useThemePreference();
   const [shortcut, setShortcut] = useState(settings.shortcut ?? "");
   const [autostart, setAutostart] = useState(settings.autostart);
@@ -42,7 +43,7 @@ function SettingsPage({ snapshot, applySnapshot, run }: {
   const [password, setPassword] = useState("");
   const [currentPassword, setCurrentPassword] = useState("");
   const [revealPassword, setRevealPassword] = useState(false);
-  const [saved, setSaved] = useState(false);
+  const [saveState, setSaveState] = useState<"idle" | "saving" | "saved" | "error">("idle");
   const [update, setUpdate] = useState<UpdateInfo | null>(null);
   const [checkingUpdate, setCheckingUpdate] = useState(false);
   const [installingUpdate, setInstallingUpdate] = useState(false);
@@ -87,16 +88,23 @@ function SettingsPage({ snapshot, applySnapshot, run }: {
   };
 
   const save = async () => {
+    setSaveState("saving");
     const next = await run(() => api.updateSettings({ autostart, homeUrl, searchTemplate, historyDays, lockOnSystemLock, quickLinks, proxyMode, proxyUrl }));
-    if (next) {
-      applySnapshot(next);
-      if (shortcut.trim() && shortcut !== settings.shortcut) {
-        const withShortcut = await run(() => api.setShortcut(shortcut.trim()));
-        if (withShortcut) applySnapshot(withShortcut);
-      }
-      setSaved(true);
-      window.setTimeout(() => setSaved(false), 1600);
+    if (!next) {
+      setSaveState("error");
+      return;
     }
+    applySnapshot(next);
+    if (shortcut.trim() && shortcut !== settings.shortcut) {
+      const withShortcut = await run(() => api.setShortcut(shortcut.trim()));
+      if (!withShortcut) {
+        setSaveState("error");
+        return;
+      }
+      applySnapshot(withShortcut);
+    }
+    setSaveState("saved");
+    window.setTimeout(() => setSaveState("idle"), 1600);
   };
 
   const captureShortcut = (event: KeyboardEvent<HTMLInputElement>) => {
@@ -138,6 +146,7 @@ function SettingsPage({ snapshot, applySnapshot, run }: {
             <Input value={shortcut} onKeyDown={captureShortcut} onChange={() => {}} placeholder="点击后按下组合键" className="w-full max-w-[280px]" />
           </Field>
           <ToggleRow
+            id="autostart"
             label="随 Windows 启动"
             description="启动后只驻留后台，不预加载网页。"
             checked={autostart}
@@ -159,8 +168,12 @@ function SettingsPage({ snapshot, applySnapshot, run }: {
                 type="number"
                 min={1}
                 max={3650}
+                step={1}
                 value={historyDays}
-                onChange={(event) => setHistoryDays(Number(event.target.value))}
+                onChange={(event) => {
+                  const value = Number(event.target.value);
+                  if (Number.isInteger(value) && value >= 1 && value <= 3650) setHistoryDays(value);
+                }}
                 className="w-24"
               />
               <span className="text-xs text-muted-foreground">天</span>
@@ -199,7 +212,7 @@ function SettingsPage({ snapshot, applySnapshot, run }: {
         <SettingsGroup title="快捷站点" description="最多 12 个，显示在新标签页。">
           <div className="flex flex-col gap-2">
             {quickLinks.map((link, index) => (
-              <div className="grid grid-cols-[130px_minmax(0,1fr)_auto] gap-2" key={link.id}>
+              <div className="grid grid-cols-1 gap-2 sm:grid-cols-[130px_minmax(0,1fr)_auto]" key={link.id}>
                 <Input aria-label="站点名称" value={link.title} onChange={(event) => updateLink(index, "title", event.target.value)} />
                 <Input aria-label="站点网址" value={link.url} onChange={(event) => updateLink(index, "url", event.target.value)} />
                 <Button
@@ -228,19 +241,20 @@ function SettingsPage({ snapshot, applySnapshot, run }: {
 
         <SettingsGroup title="应用锁" description="应用密码只保护界面入口，不加密整个 WebView2 数据目录。">
           <ToggleRow
+            id="system-lock"
             label="Windows 锁屏时自动锁定"
             description="再次呼出 QuickPane 时要求应用密码。"
             checked={lockOnSystemLock}
             onCheckedChange={setLockOnSystemLock}
-            disabled={!settings.passwordHash}
+            disabled={!hasPassword}
           />
           <div className="grid grid-cols-1 gap-2 sm:grid-cols-2">
-            {settings.passwordHash ? (
+            {hasPassword ? (
               <Field label="当前密码">
                 <Input type={revealPassword ? "text" : "password"} value={currentPassword} onChange={(event) => setCurrentPassword(event.target.value)} />
               </Field>
             ) : null}
-            <Field label={settings.passwordHash ? "新密码" : "设置密码"}>
+            <Field label={hasPassword ? "新密码" : "设置密码"}>
               <div className="relative">
                 <Input
                   type={revealPassword ? "text" : "password"}
@@ -272,9 +286,9 @@ function SettingsPage({ snapshot, applySnapshot, run }: {
                 }
               })}
             >
-              {settings.passwordHash ? "更改密码" : "启用应用锁"}
+              {hasPassword ? "更改密码" : "启用应用锁"}
             </Button>
-            {settings.passwordHash ? (
+            {hasPassword ? (
               <Button
                 variant="ghost"
                 disabled={!currentPassword}
@@ -308,7 +322,15 @@ function SettingsPage({ snapshot, applySnapshot, run }: {
                 <span>下载更新</span>
                 <span>{updateProgress.total ? `${Math.round((updateProgress.downloaded / updateProgress.total) * 100)}%` : "下载中"}</span>
               </div>
-              <div className="h-1.5 overflow-hidden rounded-full bg-muted">
+              <div
+                className="h-1.5 overflow-hidden rounded-full bg-muted"
+                role="progressbar"
+                aria-label="更新下载进度"
+                aria-valuemin={0}
+                aria-valuemax={updateProgress.total || undefined}
+                aria-valuenow={updateProgress.total ? updateProgress.downloaded : undefined}
+                aria-valuetext={updateProgress.total ? `${Math.round((updateProgress.downloaded / updateProgress.total) * 100)}%` : "下载中"}
+              >
                 <div className="h-full bg-primary transition-[width]" style={{ width: updateProgress.total ? `${Math.min(100, (updateProgress.downloaded / updateProgress.total) * 100)}%` : "35%" }} />
               </div>
             </div>
@@ -337,9 +359,10 @@ function SettingsPage({ snapshot, applySnapshot, run }: {
       </div>
 
       <div className="sticky bottom-0 mt-6 flex items-center justify-end gap-3 border-t border-border bg-background/85 px-6 py-3 backdrop-blur">
-        {saved ? <span className="text-xs text-success">设置已保存</span> : null}
-        <Button onClick={() => void save()} className="min-w-[104px]">
-          {saved ? <><Check className="size-4" />已保存</> : "保存更改"}
+        {saveState === "saved" ? <span className="text-xs text-success">设置已保存</span> : null}
+        {saveState === "error" ? <span role="alert" className="text-xs text-destructive">保存失败，请检查输入后重试</span> : null}
+        <Button disabled={saveState === "saving"} onClick={() => void save()} className="min-w-[104px]">
+          {saveState === "saving" ? <><LoaderCircle className="size-4 animate-spin" />保存中</> : saveState === "saved" ? <><Check className="size-4" />已保存</> : "保存更改"}
         </Button>
       </div>
     </div>
@@ -377,20 +400,23 @@ function FieldRow({ label, children }: { label: string; children: ReactNode }) {
   );
 }
 
-function ToggleRow({ label, description, checked, onCheckedChange, disabled = false }: {
+function ToggleRow({ id, label, description, checked, onCheckedChange, disabled = false }: {
+  id: string;
   label: string;
   description: string;
   checked: boolean;
   onCheckedChange: (value: boolean) => void;
   disabled?: boolean;
 }) {
+  const labelId = `toggle-${id}`;
+  const descriptionId = `${labelId}-description`;
   return (
     <div className={cn("flex items-center justify-between gap-4", disabled && "opacity-50")}>
       <div className="min-w-0">
-        <p className="text-xs font-medium">{label}</p>
-        <p className="mt-0.5 text-xs text-muted-foreground">{description}</p>
+        <p id={labelId} className="text-xs font-medium">{label}</p>
+        <p id={descriptionId} className="mt-0.5 text-xs text-muted-foreground">{description}</p>
       </div>
-      <Switch checked={checked} onCheckedChange={onCheckedChange} disabled={disabled} />
+      <Switch checked={checked} onCheckedChange={onCheckedChange} disabled={disabled} aria-labelledby={labelId} aria-describedby={descriptionId} />
     </div>
   );
 }

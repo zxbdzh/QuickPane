@@ -112,7 +112,13 @@ function DataRow({ icon, title, subtitle, meta, url, onOpen, onRemove, removeLab
   const row = (
     <div
       onClick={onOpen}
-      onKeyDown={(event) => { if (onOpen && (event.key === "Enter" || event.key === " ")) { event.preventDefault(); onOpen(); } }}
+      onKeyDown={(event) => {
+        if (event.target !== event.currentTarget) return;
+        if (onOpen && (event.key === "Enter" || event.key === " ")) {
+          event.preventDefault();
+          onOpen();
+        }
+      }}
       tabIndex={onOpen ? 0 : undefined}
       role={onOpen ? "button" : undefined}
       className={cn(

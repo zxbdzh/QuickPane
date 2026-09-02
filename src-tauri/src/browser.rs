@@ -16,7 +16,8 @@ use crate::state::{
 pub const CHROME_HEIGHT: f64 = 86.0;
 
 /// WebView2 的默认附加参数（与 Tauri 默认值保持一致），注入代理时必须一并带上。
-const WEBVIEW2_DEFAULT_ARGS: &str = "--disable-features=msWebOOUI,msPdfOOUI,msSmartScreenProtection";
+const WEBVIEW2_DEFAULT_ARGS: &str =
+    "--disable-features=msWebOOUI,msPdfOOUI,msSmartScreenProtection";
 
 const OPEN_TARGET_BLANK_IN_CURRENT_TAB: &str = r#"
 document.addEventListener("click", (event) => {
@@ -51,8 +52,7 @@ pub fn proxy_browser_args(proxy_mode: &str, proxy_url: &str) -> Option<String> {
         "direct" => Some(format!("{WEBVIEW2_DEFAULT_ARGS} --no-proxy-server")),
         "custom" => {
             let url = proxy_url.trim();
-            (!url.is_empty())
-                .then(|| format!("{WEBVIEW2_DEFAULT_ARGS} --proxy-server={url}"))
+            (!url.is_empty()).then(|| format!("{WEBVIEW2_DEFAULT_ARGS} --proxy-server={url}"))
         }
         _ => None,
     }
@@ -217,7 +217,6 @@ pub fn ensure_tab_webview(app: &AppHandle, tab_id: &str) -> Result<(), String> {
     let tab_id_for_title = tab_id.to_string();
     let tab_id_for_load = tab_id.to_string();
 
-
     let builder = WebviewBuilder::new(label.clone(), WebviewUrl::External(external))
         .data_directory(data_dir)
         .focused(is_active)
@@ -351,7 +350,10 @@ pub fn create_tab(
     if activate {
         hide_all_tabs(app);
         if url != "quickpane://newtab" {
-            ensure_tab_webview(app, &id)?;
+            if let Err(error) = ensure_tab_webview(app, &id) {
+                let _ = state.mutate(|runtime| runtime.data.tabs.retain(|tab| tab.id != id));
+                return Err(error);
+            }
         }
     }
     emit_snapshot(app);
@@ -402,6 +404,15 @@ pub async fn navigate_tab(
         return activate_tab(app, tab_id).await;
     }
 
+    let has_webview = app.get_webview(&tab_label(tab_id)).is_some();
+    if has_webview {
+        let url = Url::parse(&target).map_err(|_| "网址格式无效".to_string())?;
+        let webview = app
+            .get_webview(&tab_label(tab_id))
+            .ok_or_else(|| "当前页面尚未加载".to_string())?;
+        webview.navigate(url).map_err(|error| error.to_string())?;
+    }
+
     let state = app.state::<AppState>();
     state.mutate(|runtime| {
         let tab = runtime
@@ -420,12 +431,10 @@ pub async fn navigate_tab(
 
     hide_all_tabs(app);
     if let Some(webview) = app.get_webview(&tab_label(tab_id)) {
-        let url = Url::parse(&target).map_err(|_| "网址格式无效".to_string())?;
-        webview.navigate(url).map_err(|error| error.to_string())?;
         webview.show().map_err(|error| error.to_string())?;
         webview.set_focus().map_err(|error| error.to_string())?;
-    } else {
-        ensure_tab_webview(app, tab_id)?;
+    } else if let Err(error) = ensure_tab_webview(app, tab_id) {
+        return Err(error);
     }
     emit_snapshot(app);
     Ok(state.snapshot())
