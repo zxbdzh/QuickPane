@@ -23,8 +23,8 @@ use webview2_com::{
 };
 #[cfg(windows)]
 use windows::Win32::UI::Input::KeyboardAndMouse::{
-    GetKeyState, VK_0, VK_ADD, VK_CONTROL, VK_D, VK_ESCAPE, VK_F, VK_H, VK_J, VK_L, VK_OEM_MINUS,
-    VK_OEM_PLUS, VK_SHIFT, VK_SUBTRACT, VK_T, VK_TAB, VK_W,
+    GetKeyState, VK_0, VK_ADD, VK_CONTROL, VK_D, VK_F, VK_H, VK_J, VK_L, VK_OEM_MINUS, VK_OEM_PLUS,
+    VK_SHIFT, VK_SUBTRACT, VK_T, VK_TAB, VK_W,
 };
 
 pub const CHROME_HEIGHT: f64 = 86.0;
@@ -954,7 +954,6 @@ fn install_tab_shortcuts(app: &AppHandle, webview: &tauri::Webview) -> Result<()
                     let ctrl = unsafe { GetKeyState(VK_CONTROL.0 as i32) } < 0;
                     let shift = unsafe { GetKeyState(VK_SHIFT.0 as i32) } < 0;
                     let shortcut = match (ctrl, shift, key as u16) {
-                        (false, false, key) if key == VK_ESCAPE.0 => "escape",
                         (true, false, key) if key == VK_TAB.0 => "next-tab",
                         (true, true, key) if key == VK_TAB.0 => "previous-tab",
                         (true, false, key) if key == VK_T.0 => "new-tab",
