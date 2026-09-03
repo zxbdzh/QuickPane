@@ -25,3 +25,8 @@ dist-ssr
 
 # ZCode session working files
 .zcode/
+
+# Pi and local runtime artifacts
+.pi/
+output/
+nul
