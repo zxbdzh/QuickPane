@@ -124,9 +124,6 @@ pub fn hide_window(app: &AppHandle) {
     if let Some(menu) = app.get_webview_window("menu") {
         let _ = menu.hide();
     }
-    if let Some(menu) = app.get_webview_window("tab-menu") {
-        let _ = menu.hide();
-    }
     if let Some(popup) = app.get_webview_window("extension-popup") {
         let _ = popup.hide();
     }
@@ -237,9 +234,6 @@ pub fn lock_app(app: &AppHandle) {
             hide_all_tabs(app);
             set_all_muted(app, true);
             if let Some(menu) = app.get_webview_window("menu") {
-                let _ = menu.hide();
-            }
-            if let Some(menu) = app.get_webview_window("tab-menu") {
                 let _ = menu.hide();
             }
             if let Some(popup) = app.get_webview_window("extension-popup") {

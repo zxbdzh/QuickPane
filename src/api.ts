@@ -4,7 +4,6 @@ import type {
   BrowserExtension,
   ProxyMode,
   QuickLink,
-  TabRecord,
 } from "./types";
 
 export type UpdateInfo = {
@@ -85,8 +84,6 @@ export const api = {
     invoke<void>("show_menu_window", { x, y }),
   showTabMenuWindow: (tabId: string, x: number, y: number) =>
     invoke<void>("show_tab_menu_window", { tabId, x, y }),
-  getTabMenuState: () =>
-    invoke<{ tab: TabRecord; active: boolean } | null>("get_tab_menu_state"),
   showExtensionPopup: (url: string, x?: number, y?: number) =>
     invoke<void>("show_extension_popup", { url, x: x ?? null, y: y ?? null }),
   toggleExtensionPin: (extensionId: string, pinned: boolean) =>

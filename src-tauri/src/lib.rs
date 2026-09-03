@@ -16,7 +16,10 @@ use browser::{
 use chrono::Utc;
 use serde::Deserialize;
 use state::{AppSnapshot, AppState, Bookmark, QuickLink};
-use tauri::{AppHandle, Emitter, LogicalPosition, Manager, WindowEvent};
+use tauri::{
+    menu::{Menu, MenuItem, PredefinedMenuItem},
+    AppHandle, Emitter, LogicalPosition, Manager, WindowEvent,
+};
 use tauri_plugin_autostart::ManagerExt;
 use tauri_plugin_dialog::DialogExt;
 use tauri_plugin_opener::OpenerExt;
@@ -377,39 +380,14 @@ async fn show_menu_window(app: AppHandle, x: f64, y: f64) -> Result<(), String> 
     Ok(())
 }
 
-#[derive(Clone, serde::Serialize)]
-#[serde(rename_all = "camelCase")]
-struct TabMenuState {
-    tab: state::TabRecord,
-    active: bool,
-}
+static TAB_MENU_TARGET: std::sync::Mutex<Option<String>> = std::sync::Mutex::new(None);
 
-static TAB_MENU_STATE: std::sync::Mutex<Option<TabMenuState>> = std::sync::Mutex::new(None);
-static TAB_MENU_REQUESTED_AT: std::sync::Mutex<Option<std::time::Instant>> =
-    std::sync::Mutex::new(None);
-
+/// 标签右键菜单使用 Windows 原生菜单，避免独立 WebView 窗口的焦点与销毁竞态。
 #[tauri::command]
-fn get_tab_menu_state() -> Result<Option<TabMenuState>, String> {
-    TAB_MENU_STATE
-        .lock()
-        .map(|state| state.clone())
-        .map_err(|_| "标签菜单状态异常".to_string())
-}
-
-/// 标签右键菜单也必须由独立窗口承载，否则标签页的原生 WebView 会盖住 HTML 浮层。
-#[tauri::command]
-async fn show_tab_menu_window(
-    app: AppHandle,
-    tab_id: String,
-    x: f64,
-    y: f64,
-) -> Result<(), String> {
+fn show_tab_menu_window(app: AppHandle, tab_id: String, x: f64, y: f64) -> Result<(), String> {
     require_unlocked(&app)?;
-    *TAB_MENU_REQUESTED_AT
-        .lock()
-        .map_err(|_| "标签菜单状态异常".to_string())? = Some(std::time::Instant::now());
-    let state = app.state::<AppState>();
-    let payload = {
+    let (active, pinned, muted) = {
+        let state = app.state::<AppState>();
         let runtime = state
             .inner
             .lock()
@@ -419,68 +397,120 @@ async fn show_tab_menu_window(
             .tabs
             .iter()
             .find(|tab| tab.id == tab_id)
-            .cloned()
             .ok_or_else(|| "标签页不存在".to_string())?;
-        TabMenuState {
-            active: runtime.data.active_tab_id.as_deref() == Some(tab_id.as_str()),
-            tab,
-        }
+        (
+            runtime.data.active_tab_id.as_deref() == Some(tab_id.as_str()),
+            tab.pinned,
+            tab.muted,
+        )
     };
-    *TAB_MENU_STATE
+    *TAB_MENU_TARGET
         .lock()
-        .map_err(|_| "标签菜单状态异常".to_string())? = Some(payload.clone());
+        .map_err(|_| "标签菜单状态异常".to_string())? = Some(tab_id);
 
+    let activate = MenuItem::with_id(
+        &app,
+        "tab-menu-activate",
+        "激活标签页",
+        !active,
+        None::<&str>,
+    )
+    .map_err(|error| error.to_string())?;
+    let pin = MenuItem::with_id(
+        &app,
+        "tab-menu-pin",
+        if pinned {
+            "取消固定"
+        } else {
+            "固定标签页"
+        },
+        true,
+        None::<&str>,
+    )
+    .map_err(|error| error.to_string())?;
+    let mute = MenuItem::with_id(
+        &app,
+        "tab-menu-mute",
+        if muted {
+            "取消静音"
+        } else {
+            "静音标签页"
+        },
+        true,
+        None::<&str>,
+    )
+    .map_err(|error| error.to_string())?;
+    let separator = PredefinedMenuItem::separator(&app).map_err(|error| error.to_string())?;
+    let close = MenuItem::with_id(&app, "tab-menu-close", "关闭标签页", true, None::<&str>)
+        .map_err(|error| error.to_string())?;
+    let menu = Menu::with_items(&app, &[&activate, &pin, &mute, &separator, &close])
+        .map_err(|error| error.to_string())?;
     let main = app
         .get_window("main")
         .ok_or_else(|| "主窗口不存在".to_string())?;
-    let scale = main.scale_factor().map_err(|error| error.to_string())?;
-    let origin = main
-        .inner_position()
-        .map_err(|error| error.to_string())?
-        .to_logical::<f64>(scale);
-    let main_size = main
-        .inner_size()
-        .map_err(|error| error.to_string())?
-        .to_logical::<f64>(scale);
-    let menu_width = 210.0;
-    // 4 个 32px 菜单项、分隔线与容器边距合计超过 146px，旧高度会裁掉“关闭标签页”。
-    let menu_height = 180.0;
-    let position = LogicalPosition::new(
-        origin.x + x.min((main_size.width - menu_width).max(0.0)),
-        origin.y + y.min((main_size.height - menu_height).max(0.0)),
-    );
+    main.popup_menu_at(&menu, LogicalPosition::new(x, y))
+        .map_err(|error| error.to_string())
+}
 
-    if let Some(menu) = app.get_webview_window("tab-menu") {
-        menu.set_size(tauri::LogicalSize::new(menu_width, menu_height))
-            .map_err(|error| error.to_string())?;
-        menu.set_position(position)
-            .map_err(|error| error.to_string())?;
-        menu.show().map_err(|error| error.to_string())?;
-        menu.emit("tab-menu-state", payload)
-            .map_err(|error| error.to_string())?;
-        menu.set_focus().map_err(|error| error.to_string())?;
-        return Ok(());
+fn run_tab_menu_action(app: &AppHandle, action: &str) {
+    let Some(tab_id) = TAB_MENU_TARGET
+        .lock()
+        .ok()
+        .and_then(|target| target.clone())
+    else {
+        return;
+    };
+    match action {
+        "tab-menu-activate" => {
+            let app = app.clone();
+            tauri::async_runtime::spawn(async move {
+                let _ = activate_tab(&app, &tab_id).await;
+            });
+        }
+        "tab-menu-pin" => {
+            let pinned = app
+                .state::<AppState>()
+                .inner
+                .lock()
+                .ok()
+                .and_then(|runtime| {
+                    runtime
+                        .data
+                        .tabs
+                        .iter()
+                        .find(|tab| tab.id == tab_id)
+                        .map(|tab| tab.pinned)
+                });
+            if let Some(pinned) = pinned {
+                let _ = set_tab_pinned_record(app, &tab_id, !pinned);
+            }
+        }
+        "tab-menu-mute" => {
+            let muted = app
+                .state::<AppState>()
+                .inner
+                .lock()
+                .ok()
+                .and_then(|runtime| {
+                    runtime
+                        .data
+                        .tabs
+                        .iter()
+                        .find(|tab| tab.id == tab_id)
+                        .map(|tab| tab.muted)
+                });
+            if let Some(muted) = muted {
+                let _ = set_tab_muted_record(app, &tab_id, !muted);
+            }
+        }
+        "tab-menu-close" => {
+            let app = app.clone();
+            tauri::async_runtime::spawn(async move {
+                let _ = close_tab(&app, &tab_id).await;
+            });
+        }
+        _ => {}
     }
-
-    let menu = tauri::WebviewWindowBuilder::new(
-        &app,
-        "tab-menu",
-        tauri::WebviewUrl::App("index.html".into()),
-    )
-    .title("QuickPane 标签菜单")
-    .inner_size(menu_width, menu_height)
-    .position(position.x, position.y)
-    .decorations(false)
-    .transparent(true)
-    .always_on_top(true)
-    .skip_taskbar(true)
-    .resizable(false)
-    .shadow(false)
-    .focused(true)
-    .build()
-    .map_err(|error| error.to_string())?;
-    menu.set_focus().map_err(|error| error.to_string())?;
-    Ok(())
 }
 #[tauri::command]
 async fn install_extension(app: AppHandle) -> Result<Vec<extensions::ExtInfo>, String> {
@@ -955,7 +985,6 @@ fn register_commands(builder: tauri::Builder<tauri::Wry>) -> tauri::Builder<taur
         set_extension_enabled,
         show_menu_window,
         show_tab_menu_window,
-        get_tab_menu_state,
         show_extension_popup,
         toggle_extension_pin,
         check_update,
@@ -993,6 +1022,7 @@ pub fn run() {
             app.manage(UpdateState::default());
 
             install_tray(&handle).map_err(std::io::Error::other)?;
+            app.on_menu_event(|app, event| run_tab_menu_action(app, event.id.as_ref()));
             install_session_lock_listener(&handle).map_err(std::io::Error::other)?;
             if let Some(shortcut) = configured_shortcut {
                 if let Err(error) = register_shortcut(&handle, &shortcut) {
@@ -1037,18 +1067,6 @@ pub fn run() {
             WindowEvent::Resized(_) | WindowEvent::ScaleFactorChanged { .. } => {
                 resize_tabs(window.app_handle());
             }
-            WindowEvent::Focused(false) if window.label() == "tab-menu" => {
-                // 忽略右键打开期间的焦点抖动，避免第二次打开被立即隐藏。
-                let opening = TAB_MENU_REQUESTED_AT
-                    .lock()
-                    .ok()
-                    .and_then(|at| at.map(|instant| instant.elapsed().as_millis() < 300))
-                    .unwrap_or(false);
-                if !opening {
-                    let _ = window.hide();
-                }
-            }
-            // 扩展面板小窗：点击外部（失焦）自动收起；忽略创建瞬间的焦点抖动。
             WindowEvent::Focused(false) if window.label() == "extension-popup" => {
                 let settled = EXTENSION_POPUP_SHOWN_AT
                     .lock()
