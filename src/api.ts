@@ -1,5 +1,11 @@
 import { invoke } from "@tauri-apps/api/core";
-import type { AppSnapshot, BrowserExtension, ProxyMode, QuickLink } from "./types";
+import type {
+  AppSnapshot,
+  BrowserExtension,
+  ProxyMode,
+  QuickLink,
+  TabRecord,
+} from "./types";
 
 export type UpdateInfo = {
   version: string;
@@ -18,6 +24,12 @@ export const api = {
     invoke<AppSnapshot>("new_tab", { url: url ?? null, activate }),
   selectTab: (tabId: string) => invoke<AppSnapshot>("select_tab", { tabId }),
   removeTab: (tabId: string) => invoke<AppSnapshot>("remove_tab", { tabId }),
+  setTabPinned: (tabId: string, pinned: boolean) =>
+    invoke<AppSnapshot>("set_tab_pinned", { tabId, pinned }),
+  setTabMuted: (tabId: string, muted: boolean) =>
+    invoke<AppSnapshot>("set_tab_muted", { tabId, muted }),
+  restoreClosedTab: (tabId?: string) =>
+    invoke<AppSnapshot>("restore_closed_tab", { tabId: tabId ?? null }),
   navigate: (tabId: string, input: string) =>
     invoke<AppSnapshot>("navigate", { tabId, input }),
   reload: () => invoke<void>("reload"),
@@ -25,7 +37,8 @@ export const api = {
   forward: () => invoke<void>("go_forward"),
   find: () => invoke<void>("find_in_page"),
   zoom: (scale: number) => invoke<void>("zoom_page", { scale }),
-  showShell: (visible: boolean) => invoke<AppSnapshot>("show_shell", { visible }),
+  showShell: (visible: boolean) =>
+    invoke<AppSnapshot>("show_shell", { visible }),
   hide: () => invoke<void>("hide_to_tray"),
   exit: () => invoke<void>("exit_app"),
   setShortcut: (shortcut: string) =>
@@ -36,6 +49,7 @@ export const api = {
     searchTemplate: string;
     historyDays: number;
     lockOnSystemLock: boolean;
+    autoLockAfterHideSeconds: number;
     quickLinks: QuickLink[];
     proxyMode: ProxyMode;
     proxyUrl: string;
@@ -63,8 +77,16 @@ export const api = {
   removeExtension: (extensionId: string) =>
     invoke<BrowserExtension[]>("remove_extension", { extensionId }),
   setExtensionEnabled: (extensionId: string, enabled: boolean) =>
-    invoke<BrowserExtension[]>("set_extension_enabled", { extensionId, enabled }),
-  showMenuWindow: (x: number, y: number) => invoke<void>("show_menu_window", { x, y }),
+    invoke<BrowserExtension[]>("set_extension_enabled", {
+      extensionId,
+      enabled,
+    }),
+  showMenuWindow: (x: number, y: number) =>
+    invoke<void>("show_menu_window", { x, y }),
+  showTabMenuWindow: (tabId: string, x: number, y: number) =>
+    invoke<void>("show_tab_menu_window", { tabId, x, y }),
+  getTabMenuState: () =>
+    invoke<{ tab: TabRecord; active: boolean } | null>("get_tab_menu_state"),
   showExtensionPopup: (url: string, x?: number, y?: number) =>
     invoke<void>("show_extension_popup", { url, x: x ?? null, y: y ?? null }),
   toggleExtensionPin: (extensionId: string, pinned: boolean) =>

@@ -2,6 +2,7 @@ import {
   ArrowLeft,
   ArrowRight,
   Clock3,
+  Globe2,
   Home,
   LoaderCircle,
   Menu,
@@ -28,7 +29,7 @@ function NavigationBar({ activeTab, address, onAddress, onSubmit, addressRef, su
   onSubmit: (event: FormEvent) => void;
   addressRef: RefObject<HTMLInputElement | null>;
   suggestions: AddressSuggestion[];
-  onSuggestion: (url: string) => void;
+  onSuggestion: (suggestion: AddressSuggestion) => void;
   onSuggestionsOpenChange: (open: boolean) => void;
   windowVisible: boolean;
   bookmarked: boolean;
@@ -77,7 +78,7 @@ function NavigationBar({ activeTab, address, onAddress, onSubmit, addressRef, su
 
   const chooseSuggestion = (suggestion: AddressSuggestion) => {
     closeSuggestions();
-    onSuggestion(suggestion.url);
+    onSuggestion(suggestion);
   };
 
   const handleAddressKeyDown = (event: KeyboardEvent<HTMLInputElement>) => {
@@ -187,7 +188,9 @@ function NavigationBar({ activeTab, address, onAddress, onSubmit, addressRef, su
                   index === selectedSuggestion && "bg-accent text-accent-foreground",
                 )}
               >
-                {suggestion.source === "history" ? (
+                {suggestion.source === "tab" ? (
+                  <Globe2 className="size-4 text-muted-foreground" />
+                ) : suggestion.source === "history" ? (
                   <Clock3 className="size-4 text-muted-foreground" />
                 ) : suggestion.source === "bookmark" ? (
                   <Star className="size-4 text-muted-foreground" />

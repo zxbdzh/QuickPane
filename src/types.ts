@@ -61,6 +61,7 @@ export type Settings = {
   historyDays: number;
   passwordHash: string | null;
   lockOnSystemLock: boolean;
+  autoLockAfterHideSeconds: number;
   quickLinks: QuickLink[];
   proxyMode: ProxyMode;
   proxyUrl: string;

@@ -147,7 +147,7 @@ pub fn list(app: &AppHandle) -> Vec<ExtInfo> {
     };
     let mut items = read_installed(&dir, true);
     items.extend(read_installed(&disabled, false));
-    items.sort_by(|a, b| a.name.to_lowercase().cmp(&b.name.to_lowercase()));
+    items.sort_by_key(|a| a.name.to_lowercase());
     items
 }
 
@@ -242,7 +242,7 @@ fn is_reparse_or_link(path: &Path) -> Result<bool, String> {
     #[cfg(windows)]
     {
         use std::os::windows::fs::MetadataExt;
-        return Ok(metadata.file_attributes() & 0x400 != 0);
+        Ok(metadata.file_attributes() & 0x400 != 0)
     }
     #[cfg(not(windows))]
     Ok(false)

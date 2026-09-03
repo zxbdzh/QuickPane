@@ -34,6 +34,27 @@ test("优先保留快捷站点或书签并按历史访问时间排序", () => {
   assert.deepEqual(suggestions.slice(1).map((item) => item.url), ["https://new.example.net", "https://old.example.net"]);
 });
 
+test("当前打开标签优先并返回标签 id", () => {
+  const suggestions = getAddressSuggestions({
+    query: "docs",
+    tabs: [
+      { id: "tab-1", title: "开发文档", url: "https://docs.example", pinned: true, lastActiveAt: now },
+      { id: "tab-2", title: "其他页面", url: "https://other.example", pinned: false, lastActiveAt: now },
+    ],
+    quickLinks: [],
+    bookmarks: [{ id: "b1", title: "开发文档书签", url: "https://docs.example/", createdAt: now }],
+    history: [],
+  });
+
+  assert.deepEqual(suggestions[0], {
+    title: "开发文档",
+    url: "https://docs.example",
+    host: "docs.example",
+    source: "tab",
+    tabId: "tab-1",
+  });
+});
+
 test("支持标题、主机名和网址子串匹配，并优先展示书签", () => {
   const suggestions = getAddressSuggestions({
     query: "docs",

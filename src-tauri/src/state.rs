@@ -2,6 +2,7 @@ use std::{
     fs,
     path::{Path, PathBuf},
     sync::Mutex,
+    time::Instant,
 };
 
 use argon2::{
@@ -97,6 +98,7 @@ pub struct Settings {
     pub history_days: u32,
     pub password_hash: Option<String>,
     pub lock_on_system_lock: bool,
+    pub auto_lock_after_hide_seconds: u32,
     pub quick_links: Vec<QuickLink>,
     /// "system" 跟随系统代理，"direct" 强制直连，"custom" 使用 proxy_url。
     pub proxy_mode: String,
@@ -115,6 +117,7 @@ impl Default for Settings {
             history_days: 90,
             password_hash: None,
             lock_on_system_lock: true,
+            auto_lock_after_hide_seconds: 0,
             quick_links: vec![QuickLink {
                 id: "kaodes".into(),
                 title: "考得尚".into(),
@@ -166,6 +169,7 @@ pub struct AppSnapshot {
     pub pinned_extensions: Vec<ExtInfo>,
     pub recovery_message: Option<String>,
 }
+#[derive(Clone)]
 pub struct RuntimeData {
     pub data: PersistedData,
     pub locked: bool,
@@ -174,6 +178,7 @@ pub struct RuntimeData {
     pub quitting: bool,
     pub shell_mode: bool,
     pub previous_window: isize,
+    pub hidden_since: Option<Instant>,
 }
 
 pub struct AppState {
@@ -224,6 +229,7 @@ impl AppState {
                 quitting: false,
                 shell_mode: true,
                 previous_window: 0,
+                hidden_since: None,
             }),
             path,
             recovery_message,
@@ -236,6 +242,12 @@ impl AppState {
         data.history.retain(|entry| {
             entry.visited_at >= Utc::now() - Duration::days(data.settings.history_days as i64)
         });
+        if !matches!(
+            data.settings.auto_lock_after_hide_seconds,
+            0 | 60 | 300 | 900
+        ) {
+            data.settings.auto_lock_after_hide_seconds = 0;
+        }
         data.history.truncate(5_000);
         data.downloads.truncate(500);
         data.recently_closed.truncate(20);
@@ -258,6 +270,7 @@ impl AppState {
         if !active_exists {
             data.active_tab_id = data.tabs.first().map(|tab| tab.id.clone());
         }
+        data.tabs.sort_by_key(|tab| !tab.pinned);
     }
 
     pub fn snapshot(&self) -> AppSnapshot {
@@ -293,25 +306,61 @@ impl AppState {
     }
 
     pub fn save(&self) -> Result<(), String> {
-        let data = self
+        let guard = self
             .inner
             .lock()
-            .map_err(|_| "应用状态无法读取".to_string())?
-            .data
-            .clone();
-        atomic_write_json(&self.path, &data)
+            .map_err(|_| "应用状态无法读取".to_string())?;
+        atomic_write_json(&self.path, &guard.data)
     }
 
     pub fn mutate<T>(&self, action: impl FnOnce(&mut RuntimeData) -> T) -> Result<T, String> {
-        let output = {
-            let mut guard = self
-                .inner
-                .lock()
-                .map_err(|_| "应用状态无法读取".to_string())?;
-            action(&mut guard)
-        };
-        self.save()?;
+        let mut guard = self
+            .inner
+            .lock()
+            .map_err(|_| "应用状态无法读取".to_string())?;
+        let previous = guard.clone();
+        let output = action(&mut guard);
+        // 保持状态锁直到写盘结束；失败时同时恢复持久化数据和运行态，避免内存与磁盘分叉。
+        if let Err(error) = atomic_write_json(&self.path, &guard.data) {
+            *guard = previous;
+            return Err(error);
+        }
         Ok(output)
+    }
+
+    pub fn mutate_result<T>(
+        &self,
+        action: impl FnOnce(&mut RuntimeData) -> Result<T, String>,
+    ) -> Result<T, String> {
+        let mut guard = self
+            .inner
+            .lock()
+            .map_err(|_| "应用状态无法读取".to_string())?;
+        let previous = guard.clone();
+        let output = match action(&mut guard) {
+            Ok(output) => output,
+            Err(error) => {
+                *guard = previous;
+                return Err(error);
+            }
+        };
+        // 保持状态锁直到写盘结束；失败时同时恢复持久化数据和运行态，避免内存与磁盘分叉。
+        if let Err(error) = atomic_write_json(&self.path, &guard.data) {
+            *guard = previous;
+            return Err(error);
+        }
+        Ok(output)
+    }
+
+    pub fn mutate_runtime<T>(
+        &self,
+        action: impl FnOnce(&mut RuntimeData) -> T,
+    ) -> Result<T, String> {
+        let mut guard = self
+            .inner
+            .lock()
+            .map_err(|_| "应用状态无法读取".to_string())?;
+        Ok(action(&mut guard))
     }
 
     pub fn verify_password(&self, password: &str) -> bool {
@@ -373,7 +422,7 @@ fn atomic_write_json(path: &Path, data: &PersistedData) -> Result<(), String> {
             )
             .map_err(|error| error.to_string())?;
         }
-        return Ok(());
+        Ok(())
     }
 
     #[cfg(not(windows))]
@@ -417,6 +466,7 @@ mod tests {
                 quitting: false,
                 shell_mode: true,
                 previous_window: 0,
+                hidden_since: None,
             }),
             path: PathBuf::from("quickpane-test.json"),
             recovery_message: None,
@@ -425,6 +475,143 @@ mod tests {
         let snapshot = state.snapshot();
         assert!(snapshot.has_password);
         assert!(snapshot.data.settings.password_hash.is_none());
+    }
+
+    #[test]
+    fn mutate_restores_memory_when_persistence_fails() {
+        let missing_parent = std::env::temp_dir()
+            .join(format!("quickpane-missing-{}", Uuid::new_v4()))
+            .join("nested");
+        let state = AppState {
+            inner: Mutex::new(RuntimeData {
+                data: PersistedData::default(),
+                locked: false,
+                first_run: false,
+                window_visible: true,
+                quitting: false,
+                shell_mode: true,
+                previous_window: 0,
+                hidden_since: None,
+            }),
+            path: missing_parent.join("quickpane.json"),
+            recovery_message: None,
+        };
+        let original_home = state
+            .inner
+            .lock()
+            .expect("state lock")
+            .data
+            .settings
+            .home_url
+            .clone();
+
+        let result = state.mutate(|runtime| {
+            runtime.data.settings.home_url = "https://changed.example".into();
+            runtime.locked = true;
+        });
+
+        assert!(result.is_err());
+        let runtime = state.inner.lock().expect("state lock");
+        assert_eq!(runtime.data.settings.home_url, original_home);
+        assert!(!runtime.locked);
+    }
+
+    #[test]
+    fn concurrent_mutations_keep_memory_and_disk_in_sync() {
+        let directory = std::env::temp_dir().join(format!("quickpane-state-{}", Uuid::new_v4()));
+        fs::create_dir_all(&directory).expect("create temp directory");
+        let state = std::sync::Arc::new(AppState {
+            inner: Mutex::new(RuntimeData {
+                data: PersistedData::default(),
+                locked: false,
+                first_run: false,
+                window_visible: true,
+                quitting: false,
+                shell_mode: true,
+                previous_window: 0,
+                hidden_since: None,
+            }),
+            path: directory.join("quickpane.json"),
+            recovery_message: None,
+        });
+        state.save().expect("save initial state");
+
+        let workers: Vec<_> = (0..8)
+            .map(|index| {
+                let state = state.clone();
+                std::thread::spawn(move || {
+                    state
+                        .mutate(|runtime| {
+                            runtime.data.settings.quick_links.push(QuickLink {
+                                id: format!("test-{index}"),
+                                title: format!("Test {index}"),
+                                url: format!("https://{index}.example"),
+                            });
+                        })
+                        .expect("mutate state");
+                })
+            })
+            .collect();
+        for worker in workers {
+            worker.join().expect("join worker");
+        }
+
+        let memory = state.inner.lock().expect("state lock").data.clone();
+        let disk: PersistedData = serde_json::from_slice(
+            &fs::read(directory.join("quickpane.json")).expect("read saved state"),
+        )
+        .expect("parse saved state");
+        assert_eq!(
+            serde_json::to_value(memory).expect("serialize memory"),
+            serde_json::to_value(disk).expect("serialize disk")
+        );
+        fs::remove_dir_all(directory).expect("remove temp directory");
+    }
+
+    #[test]
+    fn mutate_result_restores_memory_when_action_fails() {
+        let missing_parent = std::env::temp_dir()
+            .join(format!("quickpane-missing-{}", Uuid::new_v4()))
+            .join("nested");
+        let state = AppState {
+            inner: Mutex::new(RuntimeData {
+                data: PersistedData::default(),
+                locked: false,
+                first_run: false,
+                window_visible: true,
+                quitting: false,
+                shell_mode: true,
+                previous_window: 0,
+                hidden_since: None,
+            }),
+            path: missing_parent.join("quickpane.json"),
+            recovery_message: None,
+        };
+        let original_home = state
+            .inner
+            .lock()
+            .expect("state lock")
+            .data
+            .settings
+            .home_url
+            .clone();
+
+        let result: Result<(), String> = state.mutate_result(|runtime| {
+            runtime.data.settings.home_url = "https://changed.example".into();
+            Err("rejected".into())
+        });
+
+        assert_eq!(result.expect_err("action should fail"), "rejected");
+        assert_eq!(
+            state
+                .inner
+                .lock()
+                .expect("state lock")
+                .data
+                .settings
+                .home_url,
+            original_home
+        );
     }
 
     #[test]

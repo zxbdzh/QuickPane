@@ -1,13 +1,14 @@
 import { match as matchPinyin } from "pinyin-pro";
-import type { Bookmark, HistoryEntry, QuickLink } from "../types";
+import type { Bookmark, HistoryEntry, QuickLink, TabRecord } from "../types";
 
-export type AddressSuggestionSource = "quickLink" | "bookmark" | "history";
+export type AddressSuggestionSource = "tab" | "quickLink" | "bookmark" | "history";
 
 export type AddressSuggestion = {
   title: string;
   url: string;
   host: string;
   source: AddressSuggestionSource;
+  tabId?: string;
 };
 
 type SuggestionCandidate = AddressSuggestion & {
@@ -65,29 +66,41 @@ export function getAddressSuggestions({
   quickLinks,
   bookmarks,
   history,
+  tabs = [],
   limit = 8,
 }: {
   query: string;
   quickLinks: QuickLink[];
   bookmarks: Bookmark[];
   history: HistoryEntry[];
+  tabs?: TabRecord[];
   limit?: number;
 }): AddressSuggestion[] {
   const value = query.trim().toLowerCase();
   if (!value) return [];
 
   const candidates = [
-    ...quickLinks.map((item, index) => ({ ...item, source: "quickLink" as const, sourceRank: 0, visitedAt: 0, order: index })),
-    ...bookmarks.map((item, index) => ({ ...item, source: "bookmark" as const, sourceRank: 0, visitedAt: 0, order: quickLinks.length + index })),
+    ...tabs.map((item, index) => ({
+      title: item.title,
+      url: item.url,
+      tabId: item.id,
+      source: "tab" as const,
+      sourceRank: item.pinned ? -2 : -1,
+      visitedAt: visitedTimestamp(item.lastActiveAt),
+      order: index,
+    })),
+    ...quickLinks.map((item, index) => ({ ...item, tabId: undefined, source: "quickLink" as const, sourceRank: 0, visitedAt: 0, order: tabs.length + index })),
+    ...bookmarks.map((item, index) => ({ ...item, tabId: undefined, source: "bookmark" as const, sourceRank: 0, visitedAt: 0, order: tabs.length + quickLinks.length + index })),
     ...history
       .slice()
       .sort((left, right) => visitedTimestamp(right.visitedAt) - visitedTimestamp(left.visitedAt))
       .map((item, index) => ({
         ...item,
+        tabId: undefined,
         source: "history" as const,
         sourceRank: 1,
         visitedAt: visitedTimestamp(item.visitedAt),
-        order: quickLinks.length + bookmarks.length + index,
+        order: tabs.length + quickLinks.length + bookmarks.length + index,
       })),
   ];
   const matching: SuggestionCandidate[] = [];
@@ -105,6 +118,7 @@ export function getAddressSuggestions({
       url: parsed.value,
       host: parsed.host,
       source: candidate.source,
+      tabId: candidate.tabId,
       sourceRank: candidate.sourceRank,
       matchRank: rank,
       visitedAt: candidate.visitedAt,
@@ -123,5 +137,11 @@ export function getAddressSuggestions({
 
   return [...unique.values()]
     .slice(0, Math.max(0, Math.min(8, limit)))
-    .map(({ title, url, host, source }) => ({ title, url, host, source }));
+    .map(({ title, url, host, source, tabId }) => ({
+      title,
+      url,
+      host,
+      source,
+      ...(tabId === undefined ? {} : { tabId }),
+    }));
 }

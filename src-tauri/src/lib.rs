@@ -9,7 +9,9 @@ use std::time::Duration;
 use browser::{
     activate_tab, browser_data_dir, close_tab, create_tab, emit_snapshot, ensure_tab_webview,
     eval_active, extensions_dir, freeze_idle_tabs, navigate_tab, proxy_browser_args,
-    recreate_tab_webviews, reload_active, resize_tabs, set_all_muted, set_shell_mode, set_zoom,
+    recreate_tab_webviews, reload_active, resize_tabs,
+    restore_closed_tab as restore_closed_tab_record, set_all_muted, set_shell_mode,
+    set_tab_muted as set_tab_muted_record, set_tab_pinned as set_tab_pinned_record, set_zoom,
 };
 use chrono::Utc;
 use serde::Deserialize;
@@ -22,7 +24,7 @@ use tauri_plugin_updater::UpdaterExt;
 use url::Url;
 use uuid::Uuid;
 use windowing::{
-    hide_window, install_session_lock_listener, install_tray, lock_app, quit_app,
+    check_auto_lock, hide_window, install_session_lock_listener, install_tray, lock_app, quit_app,
     register_shortcut, show_window,
 };
 
@@ -66,6 +68,24 @@ async fn select_tab(app: AppHandle, tab_id: String) -> Result<AppSnapshot, Strin
 async fn remove_tab(app: AppHandle, tab_id: String) -> Result<AppSnapshot, String> {
     require_unlocked(&app)?;
     close_tab(&app, &tab_id).await
+}
+
+#[tauri::command]
+fn set_tab_pinned(app: AppHandle, tab_id: String, pinned: bool) -> Result<AppSnapshot, String> {
+    require_unlocked(&app)?;
+    set_tab_pinned_record(&app, &tab_id, pinned)
+}
+
+#[tauri::command]
+async fn restore_closed_tab(app: AppHandle, tab_id: Option<String>) -> Result<AppSnapshot, String> {
+    require_unlocked(&app)?;
+    restore_closed_tab_record(&app, tab_id.as_deref()).await
+}
+
+#[tauri::command]
+fn set_tab_muted(app: AppHandle, tab_id: String, muted: bool) -> Result<AppSnapshot, String> {
+    require_unlocked(&app)?;
+    set_tab_muted_record(&app, &tab_id, muted)
 }
 
 #[tauri::command]
@@ -166,6 +186,7 @@ struct SettingsUpdate {
     search_template: String,
     history_days: u32,
     lock_on_system_lock: bool,
+    auto_lock_after_hide_seconds: u32,
     quick_links: Vec<QuickLink>,
     proxy_mode: String,
     proxy_url: String,
@@ -214,8 +235,18 @@ async fn update_settings(
     if !(1..=3650).contains(&update.history_days) {
         return Err("历史保留天数必须在 1 到 3650 之间".into());
     }
+    if !matches!(update.auto_lock_after_hide_seconds, 0 | 60 | 300 | 900) {
+        return Err("隐藏后自动锁定时间无效".into());
+    }
     if update.quick_links.len() > 12 {
         return Err("快捷站点最多 12 个".into());
+    }
+    for link in &update.quick_links {
+        let title = link.title.trim();
+        let url = Url::parse(link.url.trim()).map_err(|_| "快捷站点网址格式无效".to_string())?;
+        if title.is_empty() || !matches!(url.scheme(), "http" | "https") {
+            return Err("快捷站点必须填写名称和 HTTP/HTTPS 地址".into());
+        }
     }
     if !["system", "direct", "custom"].contains(&update.proxy_mode.as_str()) {
         return Err("代理模式无效".into());
@@ -227,9 +258,17 @@ async fn update_settings(
         validate_proxy_url(&update.proxy_url)?;
     }
 
-    // 自启动仅在开关变化时操作注册表；disable 在条目不存在时不算错误。
-    let autostart_current = state.mutate(|runtime| runtime.data.settings.autostart)?;
-    if update.autostart != autostart_current {
+    // 自启动是外部副作用，状态提交失败时恢复注册表状态。
+    let previous_settings = state
+        .inner
+        .lock()
+        .map_err(|_| "应用状态无法读取".to_string())?
+        .data
+        .settings
+        .clone();
+    let proxy_changed = previous_settings.proxy_mode != update.proxy_mode
+        || previous_settings.proxy_url.trim() != update.proxy_url.trim();
+    if update.autostart != previous_settings.autostart {
         let result = if update.autostart {
             app.autolaunch().enable()
         } else {
@@ -242,26 +281,49 @@ async fn update_settings(
             }
         }
     }
-    // 代理是 WebView2 环境级参数，变更后需要重建全部标签 WebView 才生效。
-    let proxy_changed = state.mutate(|runtime| {
-        let settings = &mut runtime.data.settings;
-        let changed = settings.proxy_mode != update.proxy_mode
-            || settings.proxy_url.trim() != update.proxy_url.trim();
-        settings.proxy_mode = update.proxy_mode.clone();
-        settings.proxy_url = update.proxy_url.trim().to_string();
-        changed
-    })?;
-    state.mutate(|runtime| {
+
+    let home_url = update.home_url;
+    let search_template = update.search_template;
+    let proxy_mode = update.proxy_mode;
+    let proxy_url = update.proxy_url.trim().to_string();
+    let quick_links = update.quick_links;
+    if let Err(error) = state.mutate(|runtime| {
         let settings = &mut runtime.data.settings;
         settings.autostart = update.autostart;
-        settings.home_url = update.home_url;
-        settings.search_template = update.search_template;
+        settings.home_url = home_url;
+        settings.search_template = search_template;
         settings.history_days = update.history_days;
         settings.lock_on_system_lock = update.lock_on_system_lock;
-        settings.quick_links = update.quick_links;
-    })?;
+        settings.auto_lock_after_hide_seconds = update.auto_lock_after_hide_seconds;
+        settings.quick_links = quick_links;
+        settings.proxy_mode = proxy_mode;
+        settings.proxy_url = proxy_url;
+    }) {
+        if update.autostart != previous_settings.autostart {
+            let _ = if previous_settings.autostart {
+                app.autolaunch().enable()
+            } else {
+                app.autolaunch().disable()
+            };
+        }
+        return Err(error);
+    }
     if proxy_changed {
-        recreate_tab_webviews(&app).await?;
+        if let Err(error) = recreate_tab_webviews(&app).await {
+            // 尽量恢复可持久化设置和自启动；WebView 重建本身仍可能受环境影响。
+            let _ = state.mutate(|runtime| {
+                runtime.data.settings = previous_settings.clone();
+            });
+            if update.autostart != previous_settings.autostart {
+                let _ = if previous_settings.autostart {
+                    app.autolaunch().enable()
+                } else {
+                    app.autolaunch().disable()
+                };
+            }
+            let _ = recreate_tab_webviews(&app).await;
+            return Err(error);
+        }
     }
     emit_snapshot(&app);
     Ok(state.snapshot())
@@ -315,6 +377,111 @@ async fn show_menu_window(app: AppHandle, x: f64, y: f64) -> Result<(), String> 
     Ok(())
 }
 
+#[derive(Clone, serde::Serialize)]
+#[serde(rename_all = "camelCase")]
+struct TabMenuState {
+    tab: state::TabRecord,
+    active: bool,
+}
+
+static TAB_MENU_STATE: std::sync::Mutex<Option<TabMenuState>> = std::sync::Mutex::new(None);
+static TAB_MENU_REQUESTED_AT: std::sync::Mutex<Option<std::time::Instant>> =
+    std::sync::Mutex::new(None);
+
+#[tauri::command]
+fn get_tab_menu_state() -> Result<Option<TabMenuState>, String> {
+    TAB_MENU_STATE
+        .lock()
+        .map(|state| state.clone())
+        .map_err(|_| "标签菜单状态异常".to_string())
+}
+
+/// 标签右键菜单也必须由独立窗口承载，否则标签页的原生 WebView 会盖住 HTML 浮层。
+#[tauri::command]
+async fn show_tab_menu_window(
+    app: AppHandle,
+    tab_id: String,
+    x: f64,
+    y: f64,
+) -> Result<(), String> {
+    require_unlocked(&app)?;
+    *TAB_MENU_REQUESTED_AT
+        .lock()
+        .map_err(|_| "标签菜单状态异常".to_string())? = Some(std::time::Instant::now());
+    let state = app.state::<AppState>();
+    let payload = {
+        let runtime = state
+            .inner
+            .lock()
+            .map_err(|_| "应用状态无法读取".to_string())?;
+        let tab = runtime
+            .data
+            .tabs
+            .iter()
+            .find(|tab| tab.id == tab_id)
+            .cloned()
+            .ok_or_else(|| "标签页不存在".to_string())?;
+        TabMenuState {
+            active: runtime.data.active_tab_id.as_deref() == Some(tab_id.as_str()),
+            tab,
+        }
+    };
+    *TAB_MENU_STATE
+        .lock()
+        .map_err(|_| "标签菜单状态异常".to_string())? = Some(payload.clone());
+
+    let main = app
+        .get_window("main")
+        .ok_or_else(|| "主窗口不存在".to_string())?;
+    let scale = main.scale_factor().map_err(|error| error.to_string())?;
+    let origin = main
+        .inner_position()
+        .map_err(|error| error.to_string())?
+        .to_logical::<f64>(scale);
+    let main_size = main
+        .inner_size()
+        .map_err(|error| error.to_string())?
+        .to_logical::<f64>(scale);
+    let menu_width = 210.0;
+    // 4 个 32px 菜单项、分隔线与容器边距合计超过 146px，旧高度会裁掉“关闭标签页”。
+    let menu_height = 180.0;
+    let position = LogicalPosition::new(
+        origin.x + x.min((main_size.width - menu_width).max(0.0)),
+        origin.y + y.min((main_size.height - menu_height).max(0.0)),
+    );
+
+    if let Some(menu) = app.get_webview_window("tab-menu") {
+        menu.set_size(tauri::LogicalSize::new(menu_width, menu_height))
+            .map_err(|error| error.to_string())?;
+        menu.set_position(position)
+            .map_err(|error| error.to_string())?;
+        menu.show().map_err(|error| error.to_string())?;
+        menu.emit("tab-menu-state", payload)
+            .map_err(|error| error.to_string())?;
+        menu.set_focus().map_err(|error| error.to_string())?;
+        return Ok(());
+    }
+
+    let menu = tauri::WebviewWindowBuilder::new(
+        &app,
+        "tab-menu",
+        tauri::WebviewUrl::App("index.html".into()),
+    )
+    .title("QuickPane 标签菜单")
+    .inner_size(menu_width, menu_height)
+    .position(position.x, position.y)
+    .decorations(false)
+    .transparent(true)
+    .always_on_top(true)
+    .skip_taskbar(true)
+    .resizable(false)
+    .shadow(false)
+    .focused(true)
+    .build()
+    .map_err(|error| error.to_string())?;
+    menu.set_focus().map_err(|error| error.to_string())?;
+    Ok(())
+}
 #[tauri::command]
 async fn install_extension(app: AppHandle) -> Result<Vec<extensions::ExtInfo>, String> {
     require_unlocked(&app)?;
@@ -406,7 +573,7 @@ async fn show_extension_popup(
     if let Some(popup) = app.get_webview_window("extension-popup") {
         *EXTENSION_POPUP_SHOWN_AT
             .lock()
-            .expect("popup state poisoned") = Some(std::time::Instant::now());
+            .map_err(|_| "扩展弹窗状态异常".to_string())? = Some(std::time::Instant::now());
         popup.navigate(parsed).map_err(|error| error.to_string())?;
         let _ = popup.set_position(position);
         let _ = popup.show();
@@ -450,7 +617,7 @@ async fn show_extension_popup(
     let popup = builder.build().map_err(|error| error.to_string())?;
     *EXTENSION_POPUP_SHOWN_AT
         .lock()
-        .expect("popup state poisoned") = Some(std::time::Instant::now());
+        .map_err(|_| "扩展弹窗状态异常".to_string())? = Some(std::time::Instant::now());
     let _ = popup.set_focus();
     Ok(())
 }
@@ -733,14 +900,14 @@ fn skip_password_setup(
     app: AppHandle,
     state: tauri::State<'_, AppState>,
 ) -> Result<AppSnapshot, String> {
-    state.mutate(|runtime| {
+    state.mutate_result(|runtime| {
         if !runtime.first_run || runtime.data.settings.password_hash.is_some() {
             return Err("仅首次运行时可以跳过密码设置".into());
         }
         runtime.first_run = false;
         runtime.locked = false;
-        Ok::<(), String>(())
-    })??;
+        Ok(())
+    })?;
     emit_snapshot(&app);
     Ok(state.snapshot())
 }
@@ -756,6 +923,9 @@ fn register_commands(builder: tauri::Builder<tauri::Wry>) -> tauri::Builder<taur
         new_tab,
         select_tab,
         remove_tab,
+        set_tab_pinned,
+        restore_closed_tab,
+        set_tab_muted,
         navigate,
         reload,
         go_back,
@@ -784,6 +954,8 @@ fn register_commands(builder: tauri::Builder<tauri::Wry>) -> tauri::Builder<taur
         remove_extension,
         set_extension_enabled,
         show_menu_window,
+        show_tab_menu_window,
+        get_tab_menu_state,
         show_extension_popup,
         toggle_extension_pin,
         check_update,
@@ -808,7 +980,7 @@ pub fn run() {
         .plugin(tauri_plugin_opener::init())
         .plugin(tauri_plugin_updater::Builder::new().build());
 
-    register_commands(builder)
+    let run_result = register_commands(builder)
         .setup(|app| {
             let handle = app.handle().clone();
             let state = AppState::load(&handle).map_err(std::io::Error::other)?;
@@ -834,9 +1006,17 @@ pub fn run() {
             }
 
             let timer_app = handle.clone();
-            std::thread::spawn(move || loop {
-                std::thread::sleep(Duration::from_secs(60));
-                freeze_idle_tabs(&timer_app);
+            std::thread::spawn(move || {
+                let mut freeze_ticks = 0;
+                loop {
+                    std::thread::sleep(Duration::from_secs(1));
+                    check_auto_lock(&timer_app);
+                    freeze_ticks += 1;
+                    if freeze_ticks >= 60 {
+                        freeze_idle_tabs(&timer_app);
+                        freeze_ticks = 0;
+                    }
+                }
             });
             Ok(())
         })
@@ -857,6 +1037,17 @@ pub fn run() {
             WindowEvent::Resized(_) | WindowEvent::ScaleFactorChanged { .. } => {
                 resize_tabs(window.app_handle());
             }
+            WindowEvent::Focused(false) if window.label() == "tab-menu" => {
+                // 忽略右键打开期间的焦点抖动，避免第二次打开被立即隐藏。
+                let opening = TAB_MENU_REQUESTED_AT
+                    .lock()
+                    .ok()
+                    .and_then(|at| at.map(|instant| instant.elapsed().as_millis() < 300))
+                    .unwrap_or(false);
+                if !opening {
+                    let _ = window.hide();
+                }
+            }
             // 扩展面板小窗：点击外部（失焦）自动收起；忽略创建瞬间的焦点抖动。
             WindowEvent::Focused(false) if window.label() == "extension-popup" => {
                 let settled = EXTENSION_POPUP_SHOWN_AT
@@ -870,6 +1061,10 @@ pub fn run() {
             }
             _ => {}
         })
-        .run(tauri::generate_context!())
-        .expect("error while running QuickPane");
+        .run(tauri::generate_context!());
+    // 启动失败必须明确退出，避免静默留下不可用的后台进程。
+    if let Err(error) = run_result {
+        eprintln!("QuickPane 启动失败: {error}");
+        std::process::exit(1);
+    }
 }

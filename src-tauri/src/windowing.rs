@@ -30,7 +30,7 @@ pub fn install_tray(app: &AppHandle) -> Result<(), String> {
             "settings" => {
                 show_window(app);
                 let state = app.state::<AppState>();
-                let _ = state.mutate(|runtime| runtime.shell_mode = true);
+                let _ = state.mutate_runtime(|runtime| runtime.shell_mode = true);
                 hide_all_tabs(app);
                 let _ = app.emit("open-section", "settings");
                 emit_snapshot(app);
@@ -124,12 +124,16 @@ pub fn hide_window(app: &AppHandle) {
     if let Some(menu) = app.get_webview_window("menu") {
         let _ = menu.hide();
     }
+    if let Some(menu) = app.get_webview_window("tab-menu") {
+        let _ = menu.hide();
+    }
     if let Some(popup) = app.get_webview_window("extension-popup") {
         let _ = popup.hide();
     }
     if let Some(state) = app.try_state::<AppState>() {
-        let _ = state.mutate(|runtime| {
+        let _ = state.mutate_runtime(|runtime| {
             runtime.window_visible = false;
+            runtime.hidden_since = Some(std::time::Instant::now());
             if previous != 0 {
                 runtime.previous_window = previous;
             }
@@ -153,10 +157,6 @@ pub fn show_window(app: &AppHandle) {
                 .map(|runtime| runtime.window_visible)
         })
         .unwrap_or(false);
-    let shell_mode = app
-        .try_state::<AppState>()
-        .and_then(|state| state.inner.lock().ok().map(|runtime| runtime.shell_mode))
-        .unwrap_or(true);
     let locked = app
         .try_state::<AppState>()
         .and_then(|state| {
@@ -169,8 +169,9 @@ pub fn show_window(app: &AppHandle) {
         .unwrap_or(true);
     let previous = capture_foreground_window(window.hwnd().ok().map(|value| value.0 as isize));
     if let Some(state) = app.try_state::<AppState>() {
-        let _ = state.mutate(|runtime| {
+        let _ = state.mutate_runtime(|runtime| {
             runtime.window_visible = true;
+            runtime.hidden_since = None;
             if previous != 0 {
                 runtime.previous_window = previous;
             }
@@ -187,14 +188,37 @@ pub fn show_window(app: &AppHandle) {
         set_all_muted(app, false);
         show_active_tab(app);
     }
-    if !was_visible && shell_mode && !locked {
-        // 仅壳层页面需要地址栏焦点；浏览页面时由 show_active_tab 聚焦子 WebView。
+    if !was_visible && !locked {
+        // 每次从隐藏状态呼出都把输入焦点交给地址栏，保证热键后的第一步可直接输入。
         if let Some(webview) = app.get_webview("main") {
             let _ = webview.set_focus();
         }
         let _ = app.emit("focus-address", ());
     }
     emit_snapshot(app);
+}
+
+pub fn check_auto_lock(app: &AppHandle) {
+    let should_lock = app
+        .try_state::<AppState>()
+        .and_then(|state| {
+            state.inner.lock().ok().map(|runtime| {
+                !runtime.window_visible
+                    && !runtime.locked
+                    && runtime.data.settings.password_hash.is_some()
+                    && runtime.data.settings.auto_lock_after_hide_seconds > 0
+                    && runtime.hidden_since.is_some_and(|since| {
+                        since.elapsed()
+                            >= std::time::Duration::from_secs(
+                                runtime.data.settings.auto_lock_after_hide_seconds as u64,
+                            )
+                    })
+            })
+        })
+        .unwrap_or(false);
+    if should_lock {
+        lock_app(app);
+    }
 }
 
 pub fn lock_app(app: &AppHandle) {
@@ -205,13 +229,17 @@ pub fn lock_app(app: &AppHandle) {
             .map(|runtime| runtime.data.settings.password_hash.is_some())
             .unwrap_or(false);
         if should_lock {
-            let _ = state.mutate(|runtime| {
+            let _ = state.mutate_runtime(|runtime| {
                 runtime.locked = true;
                 runtime.shell_mode = true;
+                runtime.hidden_since = None;
             });
             hide_all_tabs(app);
             set_all_muted(app, true);
             if let Some(menu) = app.get_webview_window("menu") {
+                let _ = menu.hide();
+            }
+            if let Some(menu) = app.get_webview_window("tab-menu") {
                 let _ = menu.hide();
             }
             if let Some(popup) = app.get_webview_window("extension-popup") {
@@ -241,7 +269,7 @@ pub fn lock_on_system_lock(app: &AppHandle) {
 
 pub fn quit_app(app: &AppHandle) {
     if let Some(state) = app.try_state::<AppState>() {
-        let _ = state.mutate(|runtime| runtime.quitting = true);
+        let _ = state.mutate_runtime(|runtime| runtime.quitting = true);
     }
     app.exit(0);
 }
@@ -252,7 +280,7 @@ pub fn install_session_lock_listener(app: &AppHandle) -> Result<(), String> {
         Foundation::{HWND, LPARAM, LRESULT, WPARAM},
         System::RemoteDesktop::{WTSRegisterSessionNotification, NOTIFY_FOR_THIS_SESSION},
         UI::WindowsAndMessaging::{
-            CallWindowProcW, SetWindowLongPtrW, GWLP_WNDPROC, WM_WTSSESSION_CHANGE, WNDPROC,
+            CallWindowProcW, SetWindowLongPtrW, GWLP_WNDPROC, WM_WTSSESSION_CHANGE,
         },
     };
 
@@ -274,8 +302,13 @@ pub fn install_session_lock_listener(app: &AppHandle) -> Result<(), String> {
         if previous == 0 {
             LRESULT(0)
         } else {
-            let proc: WNDPROC = Some(std::mem::transmute(previous));
-            CallWindowProcW(proc, hwnd, msg, wparam, lparam)
+            let proc = unsafe {
+                std::mem::transmute::<
+                    isize,
+                    unsafe extern "system" fn(HWND, u32, WPARAM, LPARAM) -> LRESULT,
+                >(previous)
+            };
+            unsafe { CallWindowProcW(Some(proc), hwnd, msg, wparam, lparam) }
         }
     }
 

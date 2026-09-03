@@ -37,6 +37,7 @@ function SettingsPage({ snapshot, applySnapshot, run }: {
   const [searchTemplate, setSearchTemplate] = useState(settings.searchTemplate);
   const [historyDays, setHistoryDays] = useState(settings.historyDays);
   const [lockOnSystemLock, setLockOnSystemLock] = useState(settings.lockOnSystemLock);
+  const [autoLockAfterHideSeconds, setAutoLockAfterHideSeconds] = useState(settings.autoLockAfterHideSeconds ?? 0);
   const [quickLinks, setQuickLinks] = useState<QuickLink[]>(settings.quickLinks);
   const [proxyMode, setProxyMode] = useState<ProxyMode>(settings.proxyMode ?? "system");
   const [proxyUrl, setProxyUrl] = useState(settings.proxyUrl ?? "");
@@ -89,7 +90,7 @@ function SettingsPage({ snapshot, applySnapshot, run }: {
 
   const save = async () => {
     setSaveState("saving");
-    const next = await run(() => api.updateSettings({ autostart, homeUrl, searchTemplate, historyDays, lockOnSystemLock, quickLinks, proxyMode, proxyUrl }));
+    const next = await run(() => api.updateSettings({ autostart, homeUrl, searchTemplate, historyDays, lockOnSystemLock, autoLockAfterHideSeconds, quickLinks, proxyMode, proxyUrl }));
     if (!next) {
       setSaveState("error");
       return;
@@ -248,6 +249,23 @@ function SettingsPage({ snapshot, applySnapshot, run }: {
             onCheckedChange={setLockOnSystemLock}
             disabled={!hasPassword}
           />
+          <FieldRow label="隐藏后自动锁定">
+            <Select
+              value={String(autoLockAfterHideSeconds)}
+              onValueChange={(value) => setAutoLockAfterHideSeconds(Number(value))}
+              disabled={!hasPassword}
+            >
+              <SelectTrigger size="sm" className="w-40" aria-label="隐藏后自动锁定时间">
+                <SelectValue />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="0">关闭</SelectItem>
+                <SelectItem value="60">1 分钟</SelectItem>
+                <SelectItem value="300">5 分钟</SelectItem>
+                <SelectItem value="900">15 分钟</SelectItem>
+              </SelectContent>
+            </Select>
+          </FieldRow>
           <div className="grid grid-cols-1 gap-2 sm:grid-cols-2">
             {hasPassword ? (
               <Field label="当前密码">

@@ -1,4 +1,9 @@
-import type { AppSnapshot, DownloadRecord, QuickLink, Settings } from "../types";
+import type {
+  AppSnapshot,
+  DownloadRecord,
+  QuickLink,
+  Settings,
+} from "../types";
 
 /**
  * 仅供 UI 验证使用的后端模拟（/mock.html 入口）。
@@ -6,7 +11,11 @@ import type { AppSnapshot, DownloadRecord, QuickLink, Settings } from "../types"
  * 不会进入生产构建（vite build 仅以 index.html 为入口）。
  */
 
-type SnapshotListener = (event: { event: string; id: number; payload: unknown }) => void;
+type SnapshotListener = (event: {
+  event: string;
+  id: number;
+  payload: unknown;
+}) => void;
 
 const listeners = new Map<string, Set<SnapshotListener>>();
 
@@ -25,6 +34,7 @@ const DEFAULT_SETTINGS: Settings = {
   historyDays: 90,
   passwordHash: null,
   lockOnSystemLock: true,
+  autoLockAfterHideSeconds: 0,
   quickLinks: QUICK_LINKS,
   proxyMode: "system",
   proxyUrl: "",
@@ -34,7 +44,8 @@ const DEFAULT_SETTINGS: Settings = {
 const DOWNLOADS: DownloadRecord[] = [];
 
 function makeSnapshot(): AppSnapshot {
-  const bootLocked = new URLSearchParams(window.location.search).get("locked") === "1";
+  const bootLocked =
+    new URLSearchParams(window.location.search).get("locked") === "1";
   return {
     data: {
       tabs: [
@@ -53,8 +64,18 @@ function makeSnapshot(): AppSnapshot {
       activeTabId: "tab-newtab",
       recentlyClosed: [],
       history: [
-        { id: "h-1", title: "QuickPane · GitHub", url: "https://github.com/topics/browser", visitedAt: new Date().toISOString() },
-        { id: "h-2", title: "V2EX - 创意工作者社区", url: "https://www.v2ex.com", visitedAt: new Date(Date.now() - 3600_000).toISOString() },
+        {
+          id: "h-1",
+          title: "QuickPane · GitHub",
+          url: "https://github.com/topics/browser",
+          visitedAt: new Date().toISOString(),
+        },
+        {
+          id: "h-2",
+          title: "V2EX - 创意工作者社区",
+          url: "https://www.v2ex.com",
+          visitedAt: new Date(Date.now() - 3600_000).toISOString(),
+        },
       ],
       bookmarks: [],
       downloads: DOWNLOADS,
@@ -71,11 +92,14 @@ function makeSnapshot(): AppSnapshot {
 
 let snapshot = makeSnapshot();
 let mockPassword: string | null = null;
-if (new URLSearchParams(window.location.search).get("locked") === "1") mockPassword = "password";
+if (new URLSearchParams(window.location.search).get("locked") === "1")
+  mockPassword = "password";
 let eventSeq = 1;
 
 function emitEvent(name: string, payload: unknown) {
-  listeners.get(name)?.forEach((listener) => listener({ event: name, id: eventSeq++, payload }));
+  listeners
+    .get(name)
+    ?.forEach((listener) => listener({ event: name, id: eventSeq++, payload }));
 }
 
 function emitSnapshot() {
@@ -86,7 +110,10 @@ function normalizeInput(input: string) {
   const value = input.trim();
   if (/^https?:\/\//i.test(value)) return value;
   if (/^[\w.-]+\.[a-z]{2,}(\/.*)?$/i.test(value)) return `https://${value}`;
-  return DEFAULT_SETTINGS.searchTemplate.replace("{query}", encodeURIComponent(value));
+  return DEFAULT_SETTINGS.searchTemplate.replace(
+    "{query}",
+    encodeURIComponent(value),
+  );
 }
 
 function titleFromUrl(url: string) {
@@ -97,7 +124,10 @@ function titleFromUrl(url: string) {
   }
 }
 
-async function invoke(command: string, args: Record<string, unknown> = {}): Promise<unknown> {
+async function invoke(
+  command: string,
+  args: Record<string, unknown> = {},
+): Promise<unknown> {
   switch (command) {
     case "plugin:event|listen": {
       const event = args.event as string;
@@ -123,7 +153,10 @@ async function invoke(command: string, args: Record<string, unknown> = {}): Prom
       const finalUrl = url === "quickpane://newtab" ? url : normalizeInput(url);
       const tab = {
         id: `tab-${Math.random().toString(36).slice(2, 8)}`,
-        title: finalUrl === "quickpane://newtab" ? "新标签页" : titleFromUrl(finalUrl),
+        title:
+          finalUrl === "quickpane://newtab"
+            ? "新标签页"
+            : titleFromUrl(finalUrl),
         url: finalUrl,
         pinned: false,
         loading: false,
@@ -133,12 +166,55 @@ async function invoke(command: string, args: Record<string, unknown> = {}): Prom
         lastActiveAt: new Date().toISOString(),
       };
       snapshot.data.tabs.push(tab);
+      snapshot.data.tabs.sort(
+        (left, right) => Number(right.pinned) - Number(left.pinned),
+      );
       snapshot.data.activeTabId = tab.id;
       emitSnapshot();
       return structuredClone(snapshot);
     }
     case "select_tab": {
       snapshot.data.activeTabId = args.tabId as string;
+      emitSnapshot();
+      return structuredClone(snapshot);
+    }
+    case "set_tab_pinned": {
+      const tab = snapshot.data.tabs.find((item) => item.id === args.tabId);
+      if (tab) {
+        tab.pinned = Boolean(args.pinned);
+        snapshot.data.tabs.sort(
+          (left, right) => Number(right.pinned) - Number(left.pinned),
+        );
+      }
+      emitSnapshot();
+      return structuredClone(snapshot);
+    }
+    case "set_tab_muted": {
+      const tab = snapshot.data.tabs.find((item) => item.id === args.tabId);
+      if (tab) tab.muted = Boolean(args.muted);
+      emitSnapshot();
+      return structuredClone(snapshot);
+    }
+    case "restore_closed_tab": {
+      const requestedId = args.tabId as string | null | undefined;
+      const index = requestedId
+        ? snapshot.data.recentlyClosed.findIndex(
+            (item) => item.id === requestedId,
+          )
+        : 0;
+      const restored =
+        index >= 0
+          ? snapshot.data.recentlyClosed.splice(index, 1)[0]
+          : undefined;
+      if (!restored) throw new Error("没有可恢复的标签页");
+      restored.loading = false;
+      restored.loaded = true;
+      restored.muted = false;
+      snapshot.data.tabs.push(restored);
+      snapshot.data.tabs.sort(
+        (left, right) => Number(right.pinned) - Number(left.pinned),
+      );
+      snapshot.data.activeTabId = restored.id;
       emitSnapshot();
       return structuredClone(snapshot);
     }
@@ -162,8 +238,11 @@ async function invoke(command: string, args: Record<string, unknown> = {}): Prom
           lastActiveAt: new Date().toISOString(),
         });
       }
-      if (!snapshot.data.tabs.some((tab) => tab.id === snapshot.data.activeTabId)) {
-        snapshot.data.activeTabId = snapshot.data.tabs[snapshot.data.tabs.length - 1].id;
+      if (
+        !snapshot.data.tabs.some((tab) => tab.id === snapshot.data.activeTabId)
+      ) {
+        snapshot.data.activeTabId =
+          snapshot.data.tabs[snapshot.data.tabs.length - 1].id;
       }
       emitSnapshot();
       return structuredClone(snapshot);
@@ -201,7 +280,10 @@ async function invoke(command: string, args: Record<string, unknown> = {}): Prom
       return structuredClone(snapshot);
     }
     case "update_settings": {
-      Object.assign(snapshot.data.settings, args.update as Record<string, unknown>);
+      Object.assign(
+        snapshot.data.settings,
+        args.update as Record<string, unknown>,
+      );
       emitSnapshot();
       return structuredClone(snapshot);
     }
@@ -216,7 +298,9 @@ async function invoke(command: string, args: Record<string, unknown> = {}): Prom
       return structuredClone(snapshot);
     }
     case "remove_bookmark": {
-      snapshot.data.bookmarks = snapshot.data.bookmarks.filter((item) => item.id !== args.bookmarkId);
+      snapshot.data.bookmarks = snapshot.data.bookmarks.filter(
+        (item) => item.id !== args.bookmarkId,
+      );
       emitSnapshot();
       return structuredClone(snapshot);
     }
@@ -246,7 +330,8 @@ async function invoke(command: string, args: Record<string, unknown> = {}): Prom
       return structuredClone(snapshot);
     }
     case "unlock_app": {
-      if ((args.password as string) !== mockPassword) throw new Error("应用密码错误");
+      if ((args.password as string) !== mockPassword)
+        throw new Error("应用密码错误");
       snapshot.locked = false;
       snapshot.firstRun = false;
       snapshot.hasPassword = true;
@@ -274,8 +359,14 @@ const registeredCallbacks = new Map<number, (response: unknown) => void>();
 declare global {
   interface Window {
     __TAURI_INTERNALS__: {
-      invoke: (command: string, args?: Record<string, unknown>) => Promise<unknown>;
-      transformCallback: (callback: (response: unknown) => void, once?: boolean) => number;
+      invoke: (
+        command: string,
+        args?: Record<string, unknown>,
+      ) => Promise<unknown>;
+      transformCallback: (
+        callback: (response: unknown) => void,
+        once?: boolean,
+      ) => number;
       metadata?: { currentWindow?: { label: string } };
     };
     __mock: {
@@ -302,7 +393,9 @@ export function installMockBackend() {
   };
 
   // ?section=history|bookmarks|downloads|settings：App 挂载后自动切入对应页面（截图辅助）。
-  const initialSection = new URLSearchParams(window.location.search).get("section");
+  const initialSection = new URLSearchParams(window.location.search).get(
+    "section",
+  );
   if (initialSection) {
     let tries = 0;
     const timer = window.setInterval(() => {
