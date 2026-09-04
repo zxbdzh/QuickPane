@@ -18,6 +18,8 @@ use crate::extensions::{self, ExtInfo};
 
 pub const DEFAULT_HOME: &str = "https://kaodes.com";
 pub const DEFAULT_SEARCH: &str = "https://cn.bing.com/search?q={query}";
+pub const DEFAULT_TAB_SEARCH_SHORTCUT: &str = "Ctrl+Shift+A";
+pub const DEFAULT_RECENTLY_CLOSED_SHORTCUT: &str = "Ctrl+Shift+Y";
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -92,6 +94,8 @@ pub struct QuickLink {
 #[serde(default, rename_all = "camelCase")]
 pub struct Settings {
     pub shortcut: Option<String>,
+    pub tab_search_shortcut: String,
+    pub recently_closed_shortcut: String,
     pub autostart: bool,
     pub home_url: String,
     pub search_template: String,
@@ -111,6 +115,8 @@ impl Default for Settings {
     fn default() -> Self {
         Self {
             shortcut: None,
+            tab_search_shortcut: DEFAULT_TAB_SEARCH_SHORTCUT.into(),
+            recently_closed_shortcut: DEFAULT_RECENTLY_CLOSED_SHORTCUT.into(),
             autostart: false,
             home_url: DEFAULT_HOME.into(),
             search_template: DEFAULT_SEARCH.into(),

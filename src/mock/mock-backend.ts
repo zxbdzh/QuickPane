@@ -28,6 +28,8 @@ const QUICK_LINKS: QuickLink[] = [
 
 const DEFAULT_SETTINGS: Settings = {
   shortcut: "Alt+Q",
+  tabSearchShortcut: "Ctrl+Shift+A",
+  recentlyClosedShortcut: "Ctrl+Shift+Y",
   autostart: false,
   homeUrl: "https://kaodes.com",
   searchTemplate: "https://cn.bing.com/search?q={query}",

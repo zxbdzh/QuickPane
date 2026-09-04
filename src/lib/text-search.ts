@@ -16,9 +16,10 @@ export function matchesTextQuery(query: string, ...values: string[]) {
   const pinyinQuery = normalized.replace(/\s/gu, "");
   return (
     !normalized ||
-    values.some((value) =>
-      value.toLowerCase().includes(normalized) ||
-      matchesPinyinQuery(pinyinQuery, value),
+    values.some(
+      (value) =>
+        value.toLowerCase().includes(normalized) ||
+        matchesPinyinQuery(pinyinQuery, value),
     )
   );
 }

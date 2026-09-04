@@ -17,7 +17,7 @@ import {
   getAddressSuggestions,
   type AddressSuggestion,
 } from "./lib/address-suggestions";
-import { browserShortcutFromKey } from "./lib/browser-shortcuts";
+import { browserShortcutFromKey, type ConfiguredBrowserShortcuts } from "./lib/browser-shortcuts";
 import { TooltipProvider } from "./components/ui/tooltip";
 import { TabStrip } from "./components/tab-strip";
 import { NavigationBar } from "./components/navigation-bar";
@@ -42,6 +42,8 @@ const EMPTY_SNAPSHOT: AppSnapshot = {
     downloads: [],
     settings: {
       shortcut: null,
+      tabSearchShortcut: "Ctrl+Shift+A",
+      recentlyClosedShortcut: "Ctrl+Shift+Y",
       autostart: false,
       homeUrl: "https://kaodes.com",
       searchTemplate: "https://cn.bing.com/search?q={query}",
@@ -72,6 +74,10 @@ function App() {
   const [zoom, setZoom] = useState(1);
   const [navOverlayOpen, setNavOverlayOpen] = useState(false);
   const [tabStripOverlayOpen, setTabStripOverlayOpen] = useState(false);
+  const [tabPanelShortcut, setTabPanelShortcut] = useState<{
+    panel: "search" | "closed";
+    serial: number;
+  } | null>(null);
   const overlayOpen = navOverlayOpen || tabStripOverlayOpen;
   const addressRef = useRef<HTMLInputElement>(null);
   const lastActiveUrl = useRef<string | null>(null);
@@ -333,6 +339,15 @@ function App() {
           event?.preventDefault();
           void runSnapshot(() => api.restoreClosedTab());
           break;
+        case "tab-search":
+          event?.preventDefault();
+          setTabPanelShortcut({ panel: "search", serial: Date.now() });
+          break;
+        case "recently-closed":
+          event?.preventDefault();
+          setTabPanelShortcut({ panel: "closed", serial: Date.now() });
+          break;
+
         case "new-tab":
           event?.preventDefault();
           createTab();
@@ -400,7 +415,10 @@ function App() {
 
   useEffect(() => {
     const handler = (event: globalThis.KeyboardEvent) => {
-      const shortcut = browserShortcutFromKey(event);
+      const shortcut = browserShortcutFromKey(event, {
+        tabSearch: snapshot.data.settings.tabSearchShortcut,
+        recentlyClosed: snapshot.data.settings.recentlyClosedShortcut,
+      } satisfies ConfiguredBrowserShortcuts);
       if (shortcut) handleShortcut(shortcut, event);
     };
     window.addEventListener("keydown", handler);
@@ -411,7 +429,7 @@ function App() {
       window.removeEventListener("keydown", handler);
       void cleanup.then((dispose) => dispose());
     };
-  }, [handleShortcut]);
+  }, [handleShortcut, snapshot.data.settings.recentlyClosedShortcut, snapshot.data.settings.tabSearchShortcut]);
 
   if (!ready) {
     return (
@@ -445,6 +463,7 @@ function App() {
               }
               onNew={() => createTab()}
               onOverlayOpenChange={setTabStripOverlayOpen}
+              shortcutRequest={tabPanelShortcut}
             />
             <NavigationBar
               activeTab={activeTab}

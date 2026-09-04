@@ -6,6 +6,7 @@ import { useEffect, useState } from "react";
 import { api, type UpdateInfo, type UpdateProgress } from "../api";
 import type { AppSnapshot, ProxyMode, QuickLink } from "../types";
 import { useThemePreference, type ThemePreference } from "../lib/theme";
+import { findShortcutConflict } from "../lib/browser-shortcuts";
 import { cn } from "../lib/utils";
 import {
   AlertDialog,
@@ -32,6 +33,8 @@ function SettingsPage({ snapshot, applySnapshot, run }: {
   const hasPassword = snapshot.hasPassword;
   const [theme, setTheme] = useThemePreference();
   const [shortcut, setShortcut] = useState(settings.shortcut ?? "");
+  const [tabSearchShortcut, setTabSearchShortcut] = useState(settings.tabSearchShortcut);
+  const [recentlyClosedShortcut, setRecentlyClosedShortcut] = useState(settings.recentlyClosedShortcut);
   const [autostart, setAutostart] = useState(settings.autostart);
   const [homeUrl, setHomeUrl] = useState(settings.homeUrl);
   const [searchTemplate, setSearchTemplate] = useState(settings.searchTemplate);
@@ -45,6 +48,7 @@ function SettingsPage({ snapshot, applySnapshot, run }: {
   const [currentPassword, setCurrentPassword] = useState("");
   const [revealPassword, setRevealPassword] = useState(false);
   const [saveState, setSaveState] = useState<"idle" | "saving" | "saved" | "error">("idle");
+  const [saveError, setSaveError] = useState<string | null>(null);
   const [update, setUpdate] = useState<UpdateInfo | null>(null);
   const [checkingUpdate, setCheckingUpdate] = useState(false);
   const [installingUpdate, setInstallingUpdate] = useState(false);
@@ -90,30 +94,36 @@ function SettingsPage({ snapshot, applySnapshot, run }: {
 
   const save = async () => {
     setSaveState("saving");
-    const next = await run(() => api.updateSettings({ autostart, homeUrl, searchTemplate, historyDays, lockOnSystemLock, autoLockAfterHideSeconds, quickLinks, proxyMode, proxyUrl }));
+    setSaveError(null);
+    const conflict = findShortcutConflict({
+      showHide: shortcut,
+      tabSearch: tabSearchShortcut,
+      recentlyClosed: recentlyClosedShortcut,
+    });
+    if (conflict) {
+      setSaveState("error");
+      setSaveError(conflict);
+      return;
+    }
+    const next = await run(() => api.updateSettings({ shortcut: shortcut.trim() || null, tabSearchShortcut: tabSearchShortcut.trim(), recentlyClosedShortcut: recentlyClosedShortcut.trim(), autostart, homeUrl, searchTemplate, historyDays, lockOnSystemLock, autoLockAfterHideSeconds, quickLinks, proxyMode, proxyUrl }));
     if (!next) {
       setSaveState("error");
       return;
     }
     applySnapshot(next);
-    if (shortcut.trim() && shortcut !== settings.shortcut) {
-      const withShortcut = await run(() => api.setShortcut(shortcut.trim()));
-      if (!withShortcut) {
-        setSaveState("error");
-        return;
-      }
-      applySnapshot(withShortcut);
-    }
+    setShortcut(next.data.settings.shortcut ?? "");
+    setTabSearchShortcut(next.data.settings.tabSearchShortcut);
+    setRecentlyClosedShortcut(next.data.settings.recentlyClosedShortcut);
     setSaveState("saved");
     window.setTimeout(() => setSaveState("idle"), 1600);
   };
 
-  const captureShortcut = (event: KeyboardEvent<HTMLInputElement>) => {
+  const captureShortcut = (event: KeyboardEvent<HTMLInputElement>, setter: (value: string) => void = setShortcut) => {
     event.preventDefault();
     const modifiers = [event.ctrlKey ? "Ctrl" : "", event.altKey ? "Alt" : "", event.shiftKey ? "Shift" : "", event.metaKey ? "Super" : ""].filter(Boolean);
     if (["Control", "Alt", "Shift", "Meta"].includes(event.key)) return;
     const key = event.key === " " ? "Space" : event.key.length === 1 ? event.key.toUpperCase() : event.key;
-    setShortcut([...modifiers, key].join("+"));
+    setter([...modifiers, key].join("+"));
   };
 
   const updateLink = (index: number, field: "title" | "url", value: string) =>
@@ -155,6 +165,14 @@ function SettingsPage({ snapshot, applySnapshot, run }: {
           />
         </SettingsGroup>
 
+          <SettingsGroup title="标签页快捷键" description="用于快速打开标签搜索和最近关闭的标签页面板。">
+            <Field label="搜索标签页">
+              <Input value={tabSearchShortcut} onKeyDown={(event) => captureShortcut(event, setTabSearchShortcut)} onChange={() => {}} placeholder="点击后按下组合键" className="w-full max-w-[280px]" />
+            </Field>
+            <Field label="最近关闭的标签页">
+              <Input value={recentlyClosedShortcut} onKeyDown={(event) => captureShortcut(event, setRecentlyClosedShortcut)} onChange={() => {}} placeholder="点击后按下组合键" className="w-full max-w-[280px]" />
+            </Field>
+          </SettingsGroup>
         <SettingsGroup title="浏览" description="地址栏会识别网址，其余内容使用搜索引擎查询。">
           <Field label="主页">
             <Input value={homeUrl} onChange={(event) => setHomeUrl(event.target.value)} />
@@ -380,7 +398,7 @@ function SettingsPage({ snapshot, applySnapshot, run }: {
 
       <div className="sticky bottom-0 mt-6 flex items-center justify-end gap-3 border-t border-border bg-background/85 px-6 py-3 backdrop-blur">
         {saveState === "saved" ? <span className="text-xs text-success">设置已保存</span> : null}
-        {saveState === "error" ? <span role="alert" className="text-xs text-destructive">保存失败，请检查输入后重试</span> : null}
+        {saveState === "error" ? <span role="alert" className="text-xs text-destructive">{saveError ?? "保存失败，请检查输入后重试"}</span> : null}
         <Button disabled={saveState === "saving"} onClick={() => void save()} className="min-w-[104px]">
           {saveState === "saving" ? <><LoaderCircle className="size-4 animate-spin" />保存中</> : saveState === "saved" ? <><Check className="size-4" />已保存</> : "保存更改"}
         </Button>

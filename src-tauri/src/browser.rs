@@ -24,8 +24,8 @@ use webview2_com::{
 };
 #[cfg(windows)]
 use windows::Win32::UI::Input::KeyboardAndMouse::{
-    GetKeyState, VK_0, VK_ADD, VK_CONTROL, VK_D, VK_F, VK_H, VK_J, VK_L, VK_OEM_MINUS, VK_OEM_PLUS,
-    VK_SHIFT, VK_SUBTRACT, VK_T, VK_TAB, VK_W,
+    GetKeyState, VK_0, VK_ADD, VK_CONTROL, VK_D, VK_F, VK_H, VK_J, VK_L, VK_MENU,
+    VK_OEM_MINUS, VK_OEM_PLUS, VK_SHIFT, VK_SUBTRACT, VK_T, VK_TAB, VK_W,
 };
 
 pub const CHROME_HEIGHT: f64 = 86.0;
@@ -1040,6 +1040,52 @@ pub fn tab_label(tab_id: &str) -> String {
 }
 
 #[cfg(windows)]
+fn configured_tab_action(
+    app: &AppHandle,
+    ctrl: bool,
+    shift: bool,
+    alt: bool,
+    key: u16,
+) -> Option<&'static str> {
+    let key_name = if (b'A' as u16..=b'Z' as u16).contains(&key)
+        || (b'0' as u16..=b'9' as u16).contains(&key)
+    {
+        char::from_u32(key as u32)?.to_ascii_lowercase().to_string()
+    } else {
+        match key {
+            value if value == VK_TAB.0 => "tab".into(),
+            value if value == VK_OEM_PLUS.0 || value == VK_ADD.0 => "=".into(),
+            value if value == VK_OEM_MINUS.0 || value == VK_SUBTRACT.0 => "-".into(),
+            _ => return None,
+        }
+    };
+    let current = format!(
+        "{}{}{}{}",
+        if ctrl { "ctrl+" } else { "" },
+        if alt { "alt+" } else { "" },
+        if shift { "shift+" } else { "" },
+        key_name
+    );
+    let state = app.state::<AppState>();
+    let runtime = state.inner.lock().ok()?;
+    let canonical = |value: &str| {
+        value
+            .split('+')
+            .map(|part| part.trim().to_ascii_lowercase())
+            .filter(|part| !part.is_empty())
+            .collect::<Vec<_>>()
+            .join("+")
+    };
+    let current = canonical(&current);
+    if current == canonical(&runtime.data.settings.tab_search_shortcut) {
+        Some("tab-search")
+    } else if current == canonical(&runtime.data.settings.recently_closed_shortcut) {
+        Some("recently-closed")
+    } else {
+        None
+    }
+}
+#[cfg(windows)]
 fn install_tab_shortcuts(app: &AppHandle, webview: &tauri::Webview) -> Result<(), String> {
     let app = app.clone();
     webview
@@ -1064,23 +1110,26 @@ fn install_tab_shortcuts(app: &AppHandle, webview: &tauri::Webview) -> Result<()
                     }
                     let ctrl = unsafe { GetKeyState(VK_CONTROL.0 as i32) } < 0;
                     let shift = unsafe { GetKeyState(VK_SHIFT.0 as i32) } < 0;
-                    let shortcut = match (ctrl, shift, key as u16) {
-                        (true, false, key) if key == VK_TAB.0 => "next-tab",
-                        (true, true, key) if key == VK_TAB.0 => "previous-tab",
-                        (true, false, key) if key == VK_T.0 => "new-tab",
-                        (true, true, key) if key == VK_T.0 => "restore-tab",
-                        (true, false, key) if key == VK_L.0 => "focus-address",
-                        (true, false, key) if key == VK_W.0 => "close-tab",
-                        (true, false, key) if key == VK_H.0 => "history",
-                        (true, false, key) if key == VK_J.0 => "downloads",
-                        (true, false, key) if key == VK_D.0 => "bookmark",
-                        (true, false, key) if key == VK_F.0 => "find",
-                        (true, false, key) if key == VK_OEM_PLUS.0 || key == VK_ADD.0 => "zoom-in",
-                        (true, false, key) if key == VK_OEM_MINUS.0 || key == VK_SUBTRACT.0 => {
-                            "zoom-out"
-                        }
-                        (true, false, key) if key == VK_0.0 => "zoom-reset",
-                        _ => return Ok(()),
+                    let alt = unsafe { GetKeyState(VK_MENU.0 as i32) } < 0;
+                    let shortcut = configured_tab_action(&app, ctrl, shift, alt, key as u16)
+                        .or(match (ctrl, shift, key as u16) {
+                            (true, false, key) if key == VK_TAB.0 => Some("next-tab"),
+                            (true, true, key) if key == VK_TAB.0 => Some("previous-tab"),
+                            (true, false, key) if key == VK_T.0 => Some("new-tab"),
+                            (true, true, key) if key == VK_T.0 => Some("restore-tab"),
+                            (true, false, key) if key == VK_L.0 => Some("focus-address"),
+                            (true, false, key) if key == VK_W.0 => Some("close-tab"),
+                            (true, false, key) if key == VK_H.0 => Some("history"),
+                            (true, false, key) if key == VK_J.0 => Some("downloads"),
+                            (true, false, key) if key == VK_D.0 => Some("bookmark"),
+                            (true, false, key) if key == VK_F.0 => Some("find"),
+                            (true, false, key) if key == VK_OEM_PLUS.0 || key == VK_ADD.0 => Some("zoom-in"),
+                            (true, false, key) if key == VK_OEM_MINUS.0 || key == VK_SUBTRACT.0 => Some("zoom-out"),
+                            (true, false, key) if key == VK_0.0 => Some("zoom-reset"),
+                            _ => None,
+                        });
+                    let Some(shortcut) = shortcut else {
+                        return Ok(());
                     };
                     unsafe { args.SetHandled(true)? };
                     let _ = app.emit_to(

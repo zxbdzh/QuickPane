@@ -30,7 +30,13 @@ test("历史和通用文本查询支持完整拼音与首字母", () => {
 });
 
 test("英文原文匹配保持不变", () => {
-  assert.equal(matchesTextQuery("  DOCS ", "开发文档", "https://docs.example"), true);
+  assert.equal(
+    matchesTextQuery("  DOCS ", "开发文档", "https://docs.example"),
+    true,
+  );
   assert.equal(matchesTextQuery("quick pane", "QuickPane"), false);
-  assert.equal(matchesTextQuery("missing", "开发文档", "https://docs.example"), false);
+  assert.equal(
+    matchesTextQuery("missing", "开发文档", "https://docs.example"),
+    false,
+  );
 });

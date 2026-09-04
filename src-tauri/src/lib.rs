@@ -20,6 +20,7 @@ use tauri::{
     menu::{Menu, MenuItem, PredefinedMenuItem},
     AppHandle, Emitter, LogicalPosition, Manager, WindowEvent,
 };
+use tauri_plugin_global_shortcut::GlobalShortcutExt;
 use tauri_plugin_autostart::ManagerExt;
 use tauri_plugin_dialog::DialogExt;
 use tauri_plugin_opener::OpenerExt;
@@ -28,7 +29,7 @@ use url::Url;
 use uuid::Uuid;
 use windowing::{
     check_auto_lock, hide_window, install_session_lock_listener, install_tray, lock_app, quit_app,
-    register_shortcut, show_window,
+    register_shortcut, show_window, validate_shortcut,
 };
 
 #[tauri::command]
@@ -190,6 +191,9 @@ fn set_global_shortcut(
 #[derive(Debug, Deserialize)]
 #[serde(rename_all = "camelCase")]
 struct SettingsUpdate {
+    shortcut: Option<String>,
+    tab_search_shortcut: String,
+    recently_closed_shortcut: String,
     autostart: bool,
     home_url: String,
     search_template: String,
@@ -201,7 +205,61 @@ struct SettingsUpdate {
     proxy_url: String,
 }
 
-/// --proxy-server 接受 `scheme://host:port` 或裸 `host:port`。
+fn normalized_shortcut(value: &str) -> String {
+    value
+        .split('+')
+        .map(|part| part.trim().to_ascii_lowercase())
+        .filter(|part| !part.is_empty())
+        .collect::<Vec<_>>()
+        .join("+")
+}
+
+fn validate_panel_shortcuts(update: &SettingsUpdate) -> Result<(), String> {
+    let configured = [
+        (update.tab_search_shortcut.trim(), "搜索标签页"),
+        (update.recently_closed_shortcut.trim(), "最近关闭的标签页"),
+    ];
+    for (shortcut, label) in configured {
+        if shortcut.is_empty() {
+            return Err(format!("{label}快捷键不能为空"));
+        }
+        validate_shortcut(shortcut)?;
+    }
+    if let Some(shortcut) = update.shortcut.as_deref().filter(|value| !value.trim().is_empty()) {
+        validate_shortcut(shortcut)?;
+    }
+    let mut seen = Vec::new();
+    for (shortcut, label) in configured.into_iter().chain(
+        update.shortcut.as_deref().map(|value| (value.trim(), "显示 / 隐藏 QuickPane")),
+    ) {
+        let normalized = normalized_shortcut(shortcut);
+        if seen.iter().any(|(value, _)| *value == normalized) {
+            return Err(format!("{label}与其他快捷键冲突"));
+        }
+        seen.push((normalized, label));
+    }
+    for fixed in [
+        "Ctrl+Tab", "Ctrl+Shift+Tab", "Ctrl+T", "Ctrl+Shift+T", "Ctrl+L", "Ctrl+W",
+        "Ctrl+H", "Ctrl+J", "Ctrl+D", "Ctrl+F", "Ctrl+=", "Ctrl+-", "Ctrl+0",
+    ] {
+        if seen.iter().any(|(value, _)| *value == normalized_shortcut(fixed)) {
+            return Err("快捷键与内置浏览器快捷键冲突".into());
+        }
+    }
+    Ok(())
+}
+
+fn apply_global_shortcut(app: &AppHandle, shortcut: Option<&str>) -> Result<(), String> {
+    match shortcut.filter(|value| !value.trim().is_empty()) {
+        Some(value) => register_shortcut(app, value),
+        None => app
+            .global_shortcut()
+            .unregister_all()
+            .map_err(|error| error.to_string()),
+    }
+}
+
+
 fn validate_proxy_url(value: &str) -> Result<(), String> {
     let trimmed = value.trim();
     if trimmed.is_empty() || trimmed.chars().any(|c| c.is_whitespace() || c.is_control()) {
@@ -266,6 +324,7 @@ async fn update_settings(
         }
         validate_proxy_url(&update.proxy_url)?;
     }
+    validate_panel_shortcuts(&update)?;
 
     // 自启动是外部副作用，状态提交失败时恢复注册表状态。
     let previous_settings = state
@@ -277,6 +336,13 @@ async fn update_settings(
         .clone();
     let proxy_changed = previous_settings.proxy_mode != update.proxy_mode
         || previous_settings.proxy_url.trim() != update.proxy_url.trim();
+    let shortcut_changed = previous_settings.shortcut != update.shortcut;
+    if shortcut_changed {
+        if let Err(error) = apply_global_shortcut(&app, update.shortcut.as_deref()) {
+            let _ = apply_global_shortcut(&app, previous_settings.shortcut.as_deref());
+            return Err(error);
+        }
+    }
     if update.autostart != previous_settings.autostart {
         let result = if update.autostart {
             app.autolaunch().enable()
@@ -286,6 +352,9 @@ async fn update_settings(
         if let Err(error) = result {
             let not_found = error.to_string().contains("os error 2");
             if update.autostart || !not_found {
+                if shortcut_changed {
+                    let _ = apply_global_shortcut(&app, previous_settings.shortcut.as_deref());
+                }
                 return Err(error.to_string());
             }
         }
@@ -298,6 +367,9 @@ async fn update_settings(
     let quick_links = update.quick_links;
     if let Err(error) = state.mutate(|runtime| {
         let settings = &mut runtime.data.settings;
+        settings.shortcut = update.shortcut.clone();
+        settings.tab_search_shortcut = update.tab_search_shortcut.trim().to_string();
+        settings.recently_closed_shortcut = update.recently_closed_shortcut.trim().to_string();
         settings.autostart = update.autostart;
         settings.home_url = home_url;
         settings.search_template = search_template;
@@ -315,6 +387,9 @@ async fn update_settings(
                 app.autolaunch().disable()
             };
         }
+        if shortcut_changed {
+            let _ = apply_global_shortcut(&app, previous_settings.shortcut.as_deref());
+        }
         return Err(error);
     }
     if proxy_changed {
@@ -331,6 +406,9 @@ async fn update_settings(
                 };
             }
             let _ = recreate_tab_webviews(&app).await;
+            if shortcut_changed {
+                let _ = apply_global_shortcut(&app, previous_settings.shortcut.as_deref());
+            }
             return Err(error);
         }
     }

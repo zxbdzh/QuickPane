@@ -20,19 +20,62 @@ const tempDir = await mkdtemp(
 );
 const modulePath = join(tempDir, "browser-shortcuts.mjs");
 await writeFile(modulePath, compiled);
-const { browserShortcutFromKey } = await import(pathToFileURL(modulePath).href);
+const { browserShortcutFromKey, findShortcutConflict } = await import(
+  pathToFileURL(modulePath).href,
+);
 await rm(tempDir, { recursive: true, force: true });
 
-const key = (key, ctrlKey = false, shiftKey = false) => ({
+const key = (
+  key,
+  ctrlKey = false,
+  shiftKey = false,
+  altKey = false,
+  metaKey = false,
+) => ({
   key,
   ctrlKey,
   shiftKey,
+  altKey,
+  metaKey,
 });
 
 test("识别地址栏、标签恢复和缩放快捷键", () => {
   assert.equal(browserShortcutFromKey(key("l", true)), "focus-address");
   assert.equal(browserShortcutFromKey(key("T", true, true)), "restore-tab");
   assert.equal(browserShortcutFromKey(key("+", true)), "zoom-in");
+});
+
+test("识别可配置的标签面板快捷键并拒绝冲突", () => {
+  assert.equal(
+    browserShortcutFromKey(key("k", true, true), {
+      tabSearch: "Ctrl+Shift+K",
+      recentlyClosed: "Alt+Y",
+    }),
+    "tab-search",
+  );
+  assert.equal(
+    browserShortcutFromKey(key("y", false, false, true), {
+      tabSearch: "Ctrl+Shift+K",
+      recentlyClosed: "Alt+Y",
+    }),
+    "recently-closed",
+  );
+  assert.match(
+    findShortcutConflict({
+      showHide: "Alt+Q",
+      tabSearch: "Ctrl+Shift+K",
+      recentlyClosed: "Ctrl+Shift+K",
+    }),
+    /相同快捷键/,
+  );
+  assert.match(
+    findShortcutConflict({
+      showHide: "Alt+Q",
+      tabSearch: "Ctrl+H",
+      recentlyClosed: "Ctrl+Shift+Y",
+    }),
+    /历史记录/,
+  );
 });
 
 test("Escape 不依赖 Ctrl，普通输入不触发快捷键", () => {

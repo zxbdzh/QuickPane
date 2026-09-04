@@ -43,6 +43,9 @@ export const api = {
   setShortcut: (shortcut: string) =>
     invoke<AppSnapshot>("set_global_shortcut", { shortcut }),
   updateSettings: (update: {
+    shortcut: string | null;
+    tabSearchShortcut: string;
+    recentlyClosedShortcut: string;
     autostart: boolean;
     homeUrl: string;
     searchTemplate: string;

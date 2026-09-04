@@ -29,6 +29,7 @@ function TabStrip({
   onRestoreClosed,
   onNew,
   onOverlayOpenChange,
+  shortcutRequest,
 }: {
   tabs: TabRecord[];
   activeId: string | null;
@@ -40,10 +41,17 @@ function TabStrip({
   onNew: () => void;
   /** 搜索/最近关闭面板开合时上报：驱动 main WebView 扩幅，保证面板盖在网页上。 */
   onOverlayOpenChange: (open: boolean) => void;
+  /** 搜索/最近关闭面板的快捷键 toggle 请求。 */
+  shortcutRequest: { panel: "search" | "closed"; serial: number } | null;
 }) {
   const [panel, setPanel] = useState<"search" | "closed" | null>(null);
   const [query, setQuery] = useState("");
   const searchRef = useRef<HTMLInputElement>(null);
+
+  useEffect(() => {
+    if (!shortcutRequest) return;
+    setPanel((current) => (current === shortcutRequest.panel ? null : shortcutRequest.panel));
+  }, [shortcutRequest]);
 
   useEffect(() => {
     if (panel === "search") searchRef.current?.focus();

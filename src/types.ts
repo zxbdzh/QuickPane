@@ -55,6 +55,8 @@ export type BrowserExtension = {
 
 export type Settings = {
   shortcut: string | null;
+  tabSearchShortcut: string;
+  recentlyClosedShortcut: string;
   autostart: boolean;
   homeUrl: string;
   searchTemplate: string;
