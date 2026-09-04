@@ -15,14 +15,17 @@ import type { AppSnapshot, ShellSection, TabRecord } from "./types";
 import { pageFade, revealContent, revealRoot } from "./lib/motion";
 import {
   getAddressSuggestions,
+  getSourceSuggestions,
   type AddressSuggestion,
 } from "./lib/address-suggestions";
+import { parseSearchKeyword } from "./lib/quick-search";
 import {
   browserShortcutFromKey,
   type ConfiguredBrowserShortcuts,
 } from "./lib/browser-shortcuts";
 import { TooltipProvider } from "./components/ui/tooltip";
 import { TabStrip } from "./components/tab-strip";
+import { CommandPalette } from "./components/command-palette";
 import { NavigationBar } from "./components/navigation-bar";
 import { NewTabPage } from "./components/new-tab-page";
 import {
@@ -34,6 +37,7 @@ import { ExtensionsPage } from "./components/extensions-page";
 import { SettingsPage } from "./components/settings-page";
 import { LockScreen } from "./components/lock-screen";
 import { ErrorBanner } from "./components/error-banner";
+import { TabsManagerPage } from "./components/tabs-manager";
 
 const EMPTY_SNAPSHOT: AppSnapshot = {
   data: {
@@ -45,8 +49,7 @@ const EMPTY_SNAPSHOT: AppSnapshot = {
     downloads: [],
     settings: {
       shortcut: null,
-      tabSearchShortcut: "Ctrl+Shift+A",
-      recentlyClosedShortcut: "Ctrl+Shift+Y",
+      paletteShortcut: "Ctrl+Shift+A",
       autostart: false,
       homeUrl: "https://kaodes.com",
       searchTemplate: "https://cn.bing.com/search?q={query}",
@@ -58,7 +61,10 @@ const EMPTY_SNAPSHOT: AppSnapshot = {
       proxyMode: "system",
       proxyUrl: "",
       pinnedExtensions: [],
+      tabHibernationMinutes: 15,
     },
+    workspaces: [],
+    activeWorkspaceId: null,
   },
   locked: false,
   firstRun: true,
@@ -77,8 +83,8 @@ function App() {
   const [zoom, setZoom] = useState(1);
   const [navOverlayOpen, setNavOverlayOpen] = useState(false);
   const [tabStripOverlayOpen, setTabStripOverlayOpen] = useState(false);
-  const [tabPanelShortcut, setTabPanelShortcut] = useState<{
-    panel: "search" | "closed";
+  const [paletteRequest, setPaletteRequest] = useState<{
+    mode: "all" | "closed";
     serial: number;
   } | null>(null);
   const overlayOpen = navOverlayOpen || tabStripOverlayOpen;
@@ -100,22 +106,41 @@ function App() {
       activeTab.url !== "quickpane://newtab",
     [activeTab, locked, section],
   );
+  const addressKeyword = useMemo(() => parseSearchKeyword(address), [address]);
   const addressSuggestions = useMemo(
     () =>
-      getAddressSuggestions({
-        query: address,
-        quickLinks: snapshot.data.settings.quickLinks,
-        bookmarks: snapshot.data.bookmarks,
-        history: snapshot.data.history,
-        tabs: snapshot.data.tabs,
-      }),
+      addressKeyword.source
+        ? getSourceSuggestions({
+            source: addressKeyword.source,
+            query: addressKeyword.term,
+            tabs: snapshot.data.tabs,
+            bookmarks: snapshot.data.bookmarks,
+            history: snapshot.data.history,
+            limit: 20,
+          })
+        : getAddressSuggestions({
+            query: address,
+            quickLinks: snapshot.data.settings.quickLinks,
+            bookmarks: snapshot.data.bookmarks,
+            history: snapshot.data.history,
+            tabs: snapshot.data.tabs,
+          }),
     [
       address,
+      addressKeyword.source,
+      addressKeyword.term,
       snapshot.data.bookmarks,
       snapshot.data.history,
       snapshot.data.settings.quickLinks,
       snapshot.data.tabs,
     ],
+  );
+  const otherWorkspaces = useMemo(
+    () =>
+      snapshot.data.workspaces.filter(
+        (workspace) => workspace.id !== snapshot.data.activeWorkspaceId,
+      ),
+    [snapshot.data.activeWorkspaceId, snapshot.data.workspaces],
   );
 
   const applySnapshot = useCallback((next: AppSnapshot) => {
@@ -261,6 +286,14 @@ function App() {
     [runSnapshot],
   );
 
+  const selectTabById = useCallback(
+    (tabId: string) => {
+      const tab = snapshot.data.tabs.find((item) => item.id === tabId);
+      if (tab) selectTab(tab);
+    },
+    [selectTab, snapshot.data.tabs],
+  );
+
   const cycleTab = useCallback(
     (direction: 1 | -1) => {
       if (snapshot.data.tabs.length < 2) return;
@@ -342,13 +375,9 @@ function App() {
           event?.preventDefault();
           void runSnapshot(() => api.restoreClosedTab());
           break;
-        case "tab-search":
+        case "quick-switch":
           event?.preventDefault();
-          setTabPanelShortcut({ panel: "search", serial: Date.now() });
-          break;
-        case "recently-closed":
-          event?.preventDefault();
-          setTabPanelShortcut({ panel: "closed", serial: Date.now() });
+          setPaletteRequest({ mode: "all", serial: Date.now() });
           break;
 
         case "new-tab":
@@ -419,8 +448,7 @@ function App() {
   useEffect(() => {
     const handler = (event: globalThis.KeyboardEvent) => {
       const shortcut = browserShortcutFromKey(event, {
-        tabSearch: snapshot.data.settings.tabSearchShortcut,
-        recentlyClosed: snapshot.data.settings.recentlyClosedShortcut,
+        palette: snapshot.data.settings.paletteShortcut,
       } satisfies ConfiguredBrowserShortcuts);
       if (shortcut) handleShortcut(shortcut, event);
     };
@@ -432,11 +460,7 @@ function App() {
       window.removeEventListener("keydown", handler);
       void cleanup.then((dispose) => dispose());
     };
-  }, [
-    handleShortcut,
-    snapshot.data.settings.recentlyClosedShortcut,
-    snapshot.data.settings.tabSearchShortcut,
-  ]);
+  }, [handleShortcut, snapshot.data.settings.paletteShortcut]);
 
   if (!ready) {
     return (
@@ -461,16 +485,48 @@ function App() {
               <TabStrip
                 tabs={snapshot.data.tabs}
                 activeId={snapshot.data.activeTabId}
+                workspaces={snapshot.data.workspaces}
+                activeWorkspaceId={snapshot.data.activeWorkspaceId}
                 onSelect={selectTab}
                 onContextMenu={openTabMenu}
                 onClose={(id) => void runSnapshot(() => api.removeTab(id))}
+                onNew={() => createTab()}
+                onOpenPalette={(mode) =>
+                  setPaletteRequest({ mode, serial: Date.now() })
+                }
+                onCreateWorkspace={(name) =>
+                  void runSnapshot(() => api.createWorkspace(name))
+                }
+                onRenameWorkspace={(workspaceId, name) =>
+                  void runSnapshot(() =>
+                    api.renameWorkspace(workspaceId, name),
+                  )
+                }
+                onRemoveWorkspace={(workspaceId) =>
+                  void runSnapshot(() => api.removeWorkspace(workspaceId))
+                }
+                onSwitchWorkspace={(workspaceId) =>
+                  void runSnapshot(() => api.switchWorkspace(workspaceId))
+                }
+                onOverlayOpenChange={setTabStripOverlayOpen}
+              />
+              <CommandPalette
+                request={paletteRequest}
+                tabs={snapshot.data.tabs}
                 recentlyClosed={snapshot.data.recentlyClosed}
+                workspaces={otherWorkspaces}
+                bookmarks={snapshot.data.bookmarks}
+                history={snapshot.data.history}
+                activeTabId={snapshot.data.activeTabId}
+                onSelectTab={selectTabById}
                 onRestoreClosed={(id) =>
                   void runSnapshot(() => api.restoreClosedTab(id))
                 }
-                onNew={() => createTab()}
-                onOverlayOpenChange={setTabStripOverlayOpen}
-                shortcutRequest={tabPanelShortcut}
+                onSwitchWorkspace={(workspaceId) =>
+                  void runSnapshot(() => api.switchWorkspace(workspaceId))
+                }
+                onOpenUrl={(url) => createTab(url)}
+                onOpenChange={setTabStripOverlayOpen}
               />
               <NavigationBar
                 activeTab={activeTab}
@@ -480,6 +536,17 @@ function App() {
                 addressRef={addressRef}
                 suggestions={addressSuggestions}
                 onSuggestion={selectSuggestion}
+                keywordSource={addressKeyword.source}
+                workspaces={otherWorkspaces}
+                onOpenUrl={(url) => createTab(url)}
+                onCloseTab={(id) =>
+                  void runSnapshot(() => api.removeTab(id))
+                }
+                onMoveTabToWorkspace={(tabId, workspaceId) =>
+                  void runSnapshot(() =>
+                    api.moveTabToWorkspace(tabId, workspaceId),
+                  )
+                }
                 onOverlayOpenChange={setNavOverlayOpen}
                 windowVisible={snapshot.windowVisible}
                 bookmarked={Boolean(
@@ -595,6 +662,17 @@ function App() {
                       onOpen={(url) =>
                         void run(() => api.showExtensionPopup(url))
                       }
+                    />
+                  ) : section === "tabs" ? (
+                    <TabsManagerPage
+                      snapshot={snapshot}
+                      workspaces={otherWorkspaces}
+                      onBatch={(action, tabIds, workspaceId) =>
+                        void runSnapshot(() =>
+                          api.applyTabBatch(action, tabIds, workspaceId),
+                        )
+                      }
+                      onSelectTab={selectTabById}
                     />
                   ) : section === "settings" ? (
                     <SettingsPage

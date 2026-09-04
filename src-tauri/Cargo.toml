@@ -1,6 +1,6 @@
 [package]
 name = "quickpane"
-version = "0.0.3"
+version = "0.0.4"
 description = "A lightweight Windows browser with an instant privacy shortcut"
 authors = ["QuickPane"]
 edition = "2021"

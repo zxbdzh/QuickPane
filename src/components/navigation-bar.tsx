@@ -2,11 +2,15 @@ import {
   ArrowLeft,
   ArrowRight,
   Bookmark,
+  Check,
   Clock3,
+  Copy,
   Download,
+  FolderInput,
   Globe2,
   History,
   Home,
+  Layers,
   LoaderCircle,
   Lock,
   Menu,
@@ -16,13 +20,15 @@ import {
   Settings as SettingsIcon,
   ShieldCheck,
   Star,
+  X,
 } from "lucide-react";
 import { AnimatePresence, motion } from "motion/react";
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import type { FormEvent, KeyboardEvent, ReactNode, RefObject } from "react";
 
 import type { AddressSuggestion } from "../lib/address-suggestions";
-import type { ShellSection, BrowserExtension, TabRecord } from "../types";
+import type { QuickSearchSource } from "../lib/quick-search";
+import type { ShellSection, BrowserExtension, TabRecord, Workspace } from "../types";
 import { cn } from "../lib/utils";
 import { overlay } from "../lib/motion";
 import { Button } from "./ui/button";
@@ -30,7 +36,7 @@ import { IconButton } from "./icon-button";
 import { Kbd } from "./ui/kbd";
 
 /** 导航栏：高 54px（与标签栏合计 86px，对应 Rust 侧 CHROME_HEIGHT） */
-function NavigationBar({ activeTab, address, onAddress, onSubmit, addressRef, suggestions, onSuggestion, onOverlayOpenChange, windowVisible, bookmarked, onBookmark, onBack, onForward, onReload, onHome, onHide, hasPassword, onOpenSection, onLockNow, pinnedExtensions, onExtensionClick }: {
+function NavigationBar({ activeTab, address, onAddress, onSubmit, addressRef, suggestions, onSuggestion, onOverlayOpenChange, windowVisible, bookmarked, onBookmark, onBack, onForward, onReload, onHome, onHide, hasPassword, onOpenSection, onLockNow, pinnedExtensions, onExtensionClick, keywordSource, workspaces, onOpenUrl, onCloseTab, onMoveTabToWorkspace }: {
   activeTab: TabRecord | null;
   address: string;
   onAddress: (value: string) => void;
@@ -53,10 +59,21 @@ function NavigationBar({ activeTab, address, onAddress, onSubmit, addressRef, su
   onLockNow: () => void;
   pinnedExtensions: BrowserExtension[];
   onExtensionClick: (extension: BrowserExtension, anchor: { x: number; y: number }) => void;
+  /** 非空 = 地址栏处于动作关键字（t/b/h）单源模式。 */
+  keywordSource: QuickSearchSource;
+  /** 「移入工作区」目标：调用方传入当前工作区之外的选项。 */
+  workspaces: Workspace[];
+  /** 关键字模式下书签/历史条目的打开动作：新建前台标签。 */
+  onOpenUrl: (url: string) => void;
+  onCloseTab: (tabId: string) => void;
+  onMoveTabToWorkspace: (tabId: string, workspaceId: string) => void;
 }) {
   const [suggestionsRequested, setSuggestionsRequested] = useState(false);
   const [selectedSuggestion, setSelectedSuggestion] = useState(-1);
   const [menuOpen, setMenuOpen] = useState(false);
+  const [copiedKey, setCopiedKey] = useState<string | null>(null);
+  const [moveTargetTabId, setMoveTargetTabId] = useState<string | null>(null);
+  const copyTimer = useRef<number | null>(null);
   const suggestionsOpen = suggestionsRequested && suggestions.length > 0;
   const secure = address.startsWith("https://");
 
@@ -64,6 +81,7 @@ function NavigationBar({ activeTab, address, onAddress, onSubmit, addressRef, su
     setSuggestionsRequested(false);
     setSelectedSuggestion(-1);
     setMenuOpen(false);
+    setMoveTargetTabId(null);
   }, [activeTab?.id, activeTab?.url]);
 
   useEffect(() => {
@@ -71,8 +89,16 @@ function NavigationBar({ activeTab, address, onAddress, onSubmit, addressRef, su
       setSuggestionsRequested(false);
       setSelectedSuggestion(-1);
       setMenuOpen(false);
+      setMoveTargetTabId(null);
     }
   }, [windowVisible]);
+
+  useEffect(
+    () => () => {
+      if (copyTimer.current !== null) window.clearTimeout(copyTimer.current);
+    },
+    [],
+  );
 
   // 任一浮层（地址下拉/菜单）开合都上报：true → main WebView 扩幅盖网页；false → 收缩还网页。
   const overlayOpen = suggestionsOpen || menuOpen;
@@ -96,6 +122,7 @@ function NavigationBar({ activeTab, address, onAddress, onSubmit, addressRef, su
     { key: "history", icon: <History className="size-4" />, label: "历史记录", hint: "Ctrl+H", action: () => onOpenSection("history") },
     { key: "bookmarks", icon: <Bookmark className="size-4" />, label: "书签", action: () => onOpenSection("bookmarks") },
     { key: "downloads", icon: <Download className="size-4" />, label: "下载", hint: "Ctrl+J", action: () => onOpenSection("downloads") },
+    { key: "tabs", icon: <Layers className="size-4" />, label: "标签管理", action: () => onOpenSection("tabs") },
     ...(hasPassword ? [{ key: "lock", icon: <Lock className="size-4" />, label: "立即锁定", action: onLockNow }] : []),
     { key: "extensions", icon: <Puzzle className="size-4" />, label: "扩展", action: () => onOpenSection("extensions") },
     { key: "settings", icon: <SettingsIcon className="size-4" />, label: "设置", action: () => onOpenSection("settings") },
@@ -104,17 +131,34 @@ function NavigationBar({ activeTab, address, onAddress, onSubmit, addressRef, su
   const closeSuggestions = () => {
     setSuggestionsRequested(false);
     setSelectedSuggestion(-1);
+    setMoveTargetTabId(null);
   };
 
   const chooseSuggestion = (suggestion: AddressSuggestion) => {
+    if ((keywordSource === "bookmark" || keywordSource === "history") && suggestion.url && !suggestion.tabId) {
+      closeSuggestions();
+      onOpenUrl(suggestion.url);
+      return;
+    }
     closeSuggestions();
     onSuggestion(suggestion);
+  };
+
+  const copyUrl = (key: string, url: string) => {
+    void navigator.clipboard.writeText(url);
+    setCopiedKey(key);
+    if (copyTimer.current !== null) window.clearTimeout(copyTimer.current);
+    copyTimer.current = window.setTimeout(() => setCopiedKey(null), 1200);
   };
 
   const handleAddressKeyDown = (event: KeyboardEvent<HTMLInputElement>) => {
     if (event.key === "Escape" && suggestionsOpen) {
       event.preventDefault();
       event.stopPropagation();
+      if (moveTargetTabId) {
+        setMoveTargetTabId(null);
+        return;
+      }
       closeSuggestions();
       return;
     }
@@ -133,6 +177,15 @@ function NavigationBar({ activeTab, address, onAddress, onSubmit, addressRef, su
     }
   };
 
+  const keywordLabel =
+    keywordSource === "tab"
+      ? "标签"
+      : keywordSource === "bookmark"
+        ? "书签"
+        : keywordSource === "history"
+          ? "历史"
+          : null;
+
   return (
     <nav className="flex h-[54px] shrink-0 items-center gap-1.5 border-b border-border bg-surface px-2">
       <div className="flex select-none items-center gap-0.5">
@@ -148,6 +201,10 @@ function NavigationBar({ activeTab, address, onAddress, onSubmit, addressRef, su
           if (event.key === "Escape" && suggestionsOpen) {
             event.preventDefault();
             event.stopPropagation();
+            if (moveTargetTabId) {
+              setMoveTargetTabId(null);
+              return;
+            }
             closeSuggestions();
           }
         }}
@@ -167,9 +224,10 @@ function NavigationBar({ activeTab, address, onAddress, onSubmit, addressRef, su
             onAddress(event.target.value);
             setSuggestionsRequested(true);
             setSelectedSuggestion(-1);
+            setMoveTargetTabId(null);
           }}
           onKeyDown={handleAddressKeyDown}
-          placeholder="输入网址或搜索内容"
+          placeholder="输入网址或搜索内容（t 标签 · b 书签 · h 历史）"
           spellCheck={false}
           autoComplete="off"
           role="combobox"
@@ -207,38 +265,146 @@ function NavigationBar({ activeTab, address, onAddress, onSubmit, addressRef, su
               exit="exit"
               className="absolute top-[calc(100%+6px)] right-0 left-0 max-h-[360px] overflow-y-auto rounded-md border bg-popover p-1 shadow-popover"
             >
-              {suggestions.map((suggestion, index) => (
-                <button
-                  id={`address-suggestion-${index}`}
-                  key={`${suggestion.source}:${suggestion.url}`}
-                  type="button"
-                  role="option"
-                  tabIndex={-1}
-                  aria-selected={index === selectedSuggestion}
-                  onMouseDown={(event) => event.preventDefault()}
-                  onMouseEnter={() => setSelectedSuggestion(index)}
-                  onClick={() => chooseSuggestion(suggestion)}
-                  className={cn(
-                    "grid h-11 w-full grid-cols-[20px_minmax(0,1fr)_auto] items-center gap-2 rounded-sm px-2 text-left outline-none",
-                    index === selectedSuggestion && "bg-soft text-on-soft",
-                  )}
-                >
-                  {suggestion.source === "tab" ? (
-                    <Globe2 className="size-4 text-muted-foreground" />
-                  ) : suggestion.source === "history" ? (
-                    <Clock3 className="size-4 text-muted-foreground" />
-                  ) : suggestion.source === "bookmark" ? (
-                    <Star className="size-4 text-muted-foreground" />
+              {moveTargetTabId ? (
+                <>
+                  <div className="flex items-center justify-between border-b border-border/60 px-2 py-1.5">
+                    <span className="font-mono text-[10px] tracking-widest text-faint uppercase">
+                      移入工作区
+                    </span>
+                    <button
+                      type="button"
+                      onClick={() => setMoveTargetTabId(null)}
+                      className="font-mono text-[11px] text-muted-foreground transition-colors hover:text-foreground"
+                    >
+                      返回
+                    </button>
+                  </div>
+                  {workspaces.length ? (
+                    workspaces.map((workspace) => (
+                      <button
+                        key={workspace.id}
+                        type="button"
+                        onClick={() => {
+                          onMoveTabToWorkspace(moveTargetTabId, workspace.id);
+                          closeSuggestions();
+                        }}
+                        className="flex h-10 w-full items-center gap-2.5 rounded-sm px-2 text-left text-sm transition-colors hover:bg-muted focus-visible:bg-muted focus-visible:outline-none"
+                      >
+                        <Layers className="size-4 shrink-0 text-muted-foreground" />
+                        <span className="min-w-0 flex-1 truncate">{workspace.name}</span>
+                        <span className="shrink-0 font-mono text-[10px] text-faint">
+                          {workspace.tabs.length} 标签
+                        </span>
+                      </button>
+                    ))
                   ) : (
-                    <Home className="size-4 text-muted-foreground" />
+                    <p className="px-2 py-4 text-center text-xs text-muted-foreground">
+                      没有其它工作区，先在标签栏左侧新建一个
+                    </p>
                   )}
-                  <span className="min-w-0">
-                    <strong className="block truncate text-sm font-medium">{suggestion.title}</strong>
-                    <small className="block truncate font-mono text-xs text-muted-foreground">{suggestion.url}</small>
-                  </span>
-                  <span className="max-w-28 truncate font-mono text-xs text-faint">{suggestion.host}</span>
-                </button>
-              ))}
+                </>
+              ) : (
+                <>
+                  {keywordLabel ? (
+                    <div className="flex items-center justify-between border-b border-border/60 px-2 py-1.5">
+                      <span className="font-mono text-[10px] tracking-widest text-faint uppercase">
+                        {keywordLabel}搜索
+                      </span>
+                      <span className="font-mono text-[10px] text-faint">
+                        清空关键字退出
+                      </span>
+                    </div>
+                  ) : null}
+                  {suggestions.map((suggestion, index) => {
+                    const rowKey = `${suggestion.source}:${suggestion.tabId ?? suggestion.url}`;
+                    const copied = copiedKey === rowKey;
+                    return (
+                      <div
+                        id={`address-suggestion-${index}`}
+                        key={rowKey}
+                        role="option"
+                        aria-selected={index === selectedSuggestion}
+                        onMouseDown={(event) => event.preventDefault()}
+                        onMouseEnter={() => setSelectedSuggestion(index)}
+                        onClick={() => chooseSuggestion(suggestion)}
+                        className={cn(
+                          "grid h-11 w-full grid-cols-[20px_minmax(0,1fr)_auto] items-center gap-2 rounded-sm px-2 text-left outline-none",
+                          index === selectedSuggestion && "bg-soft text-on-soft",
+                        )}
+                      >
+                        {suggestion.source === "tab" ? (
+                          <Globe2 className="size-4 text-muted-foreground" />
+                        ) : suggestion.source === "history" ? (
+                          <Clock3 className="size-4 text-muted-foreground" />
+                        ) : suggestion.source === "bookmark" ? (
+                          <Star className="size-4 text-muted-foreground" />
+                        ) : (
+                          <Home className="size-4 text-muted-foreground" />
+                        )}
+                        <span className="min-w-0">
+                          <strong className="block truncate text-sm font-medium">{suggestion.title}</strong>
+                          <small className="block truncate font-mono text-xs text-muted-foreground">{suggestion.url}</small>
+                        </span>
+                        {keywordSource && suggestion.tabId ? (
+                          <span className="flex items-center gap-0.5">
+                            <button
+                              type="button"
+                              aria-label="复制网址"
+                              title="复制网址"
+                              onClick={(event) => {
+                                event.stopPropagation();
+                                copyUrl(rowKey, suggestion.url);
+                              }}
+                              className="grid size-7 place-items-center rounded-sm text-muted-foreground transition-colors hover:bg-foreground/10 hover:text-foreground"
+                            >
+                              {copied ? <Check className="size-3.5 text-primary" /> : <Copy className="size-3.5" />}
+                            </button>
+                            <button
+                              type="button"
+                              aria-label="关闭标签页"
+                              title="关闭标签页"
+                              onClick={(event) => {
+                                event.stopPropagation();
+                                onCloseTab(suggestion.tabId as string);
+                              }}
+                              className="grid size-7 place-items-center rounded-sm text-muted-foreground transition-colors hover:bg-foreground/10 hover:text-foreground"
+                            >
+                              <X className="size-3.5" />
+                            </button>
+                            <button
+                              type="button"
+                              aria-label="移入工作区"
+                              title="移入工作区"
+                              onClick={(event) => {
+                                event.stopPropagation();
+                                setMoveTargetTabId(suggestion.tabId as string);
+                              }}
+                              className="grid size-7 place-items-center rounded-sm text-muted-foreground transition-colors hover:bg-foreground/10 hover:text-foreground"
+                            >
+                              <FolderInput className="size-3.5" />
+                            </button>
+                          </span>
+                        ) : keywordSource ? (
+                          <button
+                            type="button"
+                            aria-label="复制网址"
+                            title="复制网址"
+                            onClick={(event) => {
+                              event.stopPropagation();
+                              copyUrl(rowKey, suggestion.url);
+                            }}
+                            className="grid size-7 place-items-center rounded-sm text-muted-foreground transition-colors hover:bg-foreground/10 hover:text-foreground"
+                          >
+                            {copied ? <Check className="size-3.5 text-primary" /> : <Copy className="size-3.5" />}
+                          </button>
+                        ) : (
+                          <span className="max-w-28 truncate font-mono text-xs text-faint">{suggestion.host}</span>
+                        )}
+                      </div>
+                    );
+                  })}
+                </>
+              )}
             </motion.div>
           ) : null}
         </AnimatePresence>

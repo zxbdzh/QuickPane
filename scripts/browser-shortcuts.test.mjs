@@ -45,34 +45,35 @@ test("识别地址栏、标签恢复和缩放快捷键", () => {
   assert.equal(browserShortcutFromKey(key("+", true)), "zoom-in");
 });
 
-test("识别可配置的标签面板快捷键并拒绝冲突", () => {
+test("Ctrl+K 触发快速切换面板并拒绝配置冲突", () => {
+  assert.equal(browserShortcutFromKey(key("k", true)), "quick-switch");
+  assert.match(
+    findShortcutConflict({
+      showHide: "Alt+Q",
+      palette: "Ctrl+K",
+    }),
+    /快速切换面板/,
+  );
+});
+
+test("识别可配置的面板快捷键并拒绝冲突", () => {
   assert.equal(
     browserShortcutFromKey(key("k", true, true), {
-      tabSearch: "Ctrl+Shift+K",
-      recentlyClosed: "Alt+Y",
+      palette: "Ctrl+Shift+K",
     }),
-    "tab-search",
-  );
-  assert.equal(
-    browserShortcutFromKey(key("y", false, false, true), {
-      tabSearch: "Ctrl+Shift+K",
-      recentlyClosed: "Alt+Y",
-    }),
-    "recently-closed",
+    "quick-switch",
   );
   assert.match(
     findShortcutConflict({
       showHide: "Alt+Q",
-      tabSearch: "Ctrl+Shift+K",
-      recentlyClosed: "Ctrl+Shift+K",
+      palette: "Alt+Q",
     }),
     /相同快捷键/,
   );
   assert.match(
     findShortcutConflict({
       showHide: "Alt+Q",
-      tabSearch: "Ctrl+H",
-      recentlyClosed: "Ctrl+Shift+Y",
+      palette: "Ctrl+H",
     }),
     /历史记录/,
   );

@@ -12,7 +12,7 @@ const compiled = ts.transpileModule(source, {
 const tempDir = await mkdtemp(join(dirname(fileURLToPath(import.meta.url)), ".address-suggestions-"));
 const modulePath = join(tempDir, "address-suggestions.mjs");
 await writeFile(modulePath, compiled);
-const { getAddressSuggestions } = await import(pathToFileURL(modulePath).href);
+const { getAddressSuggestions, getSourceSuggestions } = await import(pathToFileURL(modulePath).href);
 await rm(tempDir, { recursive: true, force: true });
 
 const now = "2026-08-31T12:00:00.000Z";
@@ -223,4 +223,63 @@ test("建议结果最多返回八条", () => {
   assert.equal(suggestions.length, 8);
   assert.equal(suggestions[0].url, "https://site-1.example");
   assert.equal(suggestions[7].url, "https://site-8.example");
+});
+
+test("单源建议：空词列出全部标签且同 URL 多标签不去重", () => {
+  const suggestions = getSourceSuggestions({
+    source: "tab",
+    query: "",
+    tabs: [
+      { id: "t1", title: "文档", url: "https://docs.example", lastActiveAt: "2026-08-30T12:00:00.000Z" },
+      { id: "t2", title: "文档副本", url: "https://docs.example", lastActiveAt: now },
+    ],
+  });
+
+  assert.deepEqual(suggestions.map((item) => item.tabId), ["t2", "t1"]);
+  assert.equal(suggestions.every((item) => item.source === "tab"), true);
+});
+
+test("单源建议：历史按访问时间降序且 URL 去重，上限 20", () => {
+  const suggestions = getSourceSuggestions({
+    source: "history",
+    query: "",
+    history: [
+      { id: "h1", title: "旧记录", url: "https://same.example", visitedAt: "2026-08-01T00:00:00.000Z" },
+      { id: "h2", title: "新记录", url: "https://same.example/", visitedAt: now },
+      ...Array.from({ length: 20 }, (_, index) => ({
+        id: `x${index}`,
+        title: `条目 ${index}`,
+        url: `https://entry-${index}.example`,
+        visitedAt: `2026-08-2${index % 10}T00:00:00.000Z`,
+      })),
+    ],
+  });
+
+  assert.equal(suggestions.length, 20);
+  assert.equal(suggestions[0].title, "新记录");
+  assert.ok(!suggestions.some((item) => item.title === "旧记录"));
+});
+
+test("单源建议：按关键词过滤并支持拼音", () => {
+  const suggestions = getSourceSuggestions({
+    source: "bookmark",
+    query: "kaifa",
+    bookmarks: [
+      { id: "b1", title: "开发文档", url: "https://dev.example", createdAt: now },
+      { id: "b2", title: "购物清单", url: "https://shop.example", createdAt: now },
+    ],
+  });
+
+  assert.deepEqual(suggestions.map((item) => item.url), ["https://dev.example"]);
+});
+
+test("单源建议：newtab 标签不被协议过滤", () => {
+  const suggestions = getSourceSuggestions({
+    source: "tab",
+    query: "",
+    tabs: [{ id: "t1", title: "新标签页", url: "quickpane://newtab", lastActiveAt: now }],
+  });
+
+  assert.equal(suggestions.length, 1);
+  assert.equal(suggestions[0].tabId, "t1");
 });

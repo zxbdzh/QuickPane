@@ -145,3 +145,110 @@ export function getAddressSuggestions({
       ...(tabId === undefined ? {} : { tabId }),
     }));
 }
+
+/** 单源建议：地址栏动作关键字（t/b/h）模式下按单一来源列出。 */
+export function getSourceSuggestions({
+  source,
+  query,
+  tabs = [],
+  bookmarks = [],
+  history = [],
+  limit = 20,
+}: {
+  source: AddressSuggestionSource;
+  query: string;
+  tabs?: TabRecord[];
+  bookmarks?: Bookmark[];
+  history?: HistoryEntry[];
+  limit?: number;
+}): AddressSuggestion[] {
+  const value = query.trim().toLowerCase();
+  const clamp = Math.max(0, Math.min(20, limit));
+  const pinyinCache = new Map<string, number | null>();
+
+  type SourceCandidate = AddressSuggestion & {
+    matchRank: number;
+    visitedAt: number;
+    order: number;
+  };
+  const candidates: SourceCandidate[] = [];
+
+  const push = (
+    raw: { title: string; url: string; tabId?: string },
+    visitedAt: number,
+    order: number,
+  ) => {
+    let host = raw.url.trim();
+    try {
+      const parsed = new URL(host);
+      if (parsed.hostname) host = parsed.hostname;
+    } catch {
+      // 非 http(s) 地址（如 quickpane://newtab）保留原串，标签模式不因此过滤。
+    }
+    const title = raw.title.trim();
+    const rank = value
+      ? (matchRank(value, title, raw.url, host) ?? pinyinMatchRank(value, title, pinyinCache))
+      : 0;
+    if (rank === null) return;
+    candidates.push({
+      title: title || host,
+      url: raw.url,
+      host,
+      source,
+      ...(raw.tabId === undefined ? {} : { tabId: raw.tabId }),
+      matchRank: rank,
+      visitedAt,
+      order,
+    });
+  };
+
+  if (source === "tab") {
+    tabs.forEach((tab, order) =>
+      push({ title: tab.title, url: tab.url, tabId: tab.id }, visitedTimestamp(tab.lastActiveAt), order),
+    );
+  } else if (source === "bookmark") {
+    bookmarks.forEach((bookmark, order) =>
+      push({ title: bookmark.title, url: bookmark.url }, visitedTimestamp(bookmark.createdAt), order),
+    );
+  } else if (source === "history") {
+    history.forEach((entry, order) =>
+      push({ title: entry.title, url: entry.url }, visitedTimestamp(entry.visitedAt), order),
+    );
+  } else {
+    return [];
+  }
+
+  const sorted = candidates.sort(
+    (left, right) =>
+      left.matchRank - right.matchRank
+      || right.visitedAt - left.visitedAt
+      || left.order - right.order,
+  );
+  // 标签不去重（同 URL 多标签都要可切换）；书签/历史按规范化 URL 去重。
+  if (source === "tab") {
+    return sorted.slice(0, clamp).map(({ title, url, host, tabId }) => ({
+      title,
+      url,
+      host,
+      source,
+      ...(tabId === undefined ? {} : { tabId }),
+    }));
+  }
+  const unique = new Map<string, SourceCandidate>();
+  for (const candidate of sorted) {
+    let key = candidate.url.trim();
+    try {
+      key = new URL(key).href;
+    } catch {
+      // 保留原串作 key。
+    }
+    if (!unique.has(key)) unique.set(key, candidate);
+  }
+  return [...unique.values()].slice(0, clamp).map(({ title, url, host, tabId }) => ({
+    title,
+    url,
+    host,
+    source,
+    ...(tabId === undefined ? {} : { tabId }),
+  }));
+}

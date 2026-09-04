@@ -6,19 +6,17 @@ export type BrowserShortcut =
   | "new-tab"
   | "focus-address"
   | "close-tab"
+  | "quick-switch"
   | "history"
   | "downloads"
   | "bookmark"
   | "find"
   | "zoom-in"
   | "zoom-out"
-  | "zoom-reset"
-  | "tab-search"
-  | "recently-closed";
+  | "zoom-reset";
 
 export type ConfiguredBrowserShortcuts = {
-  tabSearch: string;
-  recentlyClosed: string;
+  palette: string;
 };
 
 type ShortcutKeyEvent = Pick<
@@ -33,6 +31,7 @@ const FIXED_SHORTCUTS: Array<[string, string]> = [
   ["Ctrl+Shift+T", "恢复关闭的标签页"],
   ["Ctrl+L", "聚焦地址栏"],
   ["Ctrl+W", "关闭当前标签页"],
+  ["Ctrl+K", "快速切换面板"],
   ["Ctrl+H", "打开历史记录"],
   ["Ctrl+J", "打开下载"],
   ["Ctrl+D", "收藏当前页面"],
@@ -91,13 +90,11 @@ function eventShortcut(event: ShortcutKeyEvent): string | null {
 
 export function findShortcutConflict(bindings: {
   showHide: string;
-  tabSearch: string;
-  recentlyClosed: string;
+  palette: string;
 }): string | null {
   const configured: Array<[string, string]> = [
     [bindings.showHide, "显示 / 隐藏 QuickPane"],
-    [bindings.tabSearch, "搜索标签页"],
-    [bindings.recentlyClosed, "最近关闭的标签页"],
+    [bindings.palette, "快速切换面板"],
   ];
   const seen = new Map<string, string>();
   for (const [shortcut, label] of configured) {
@@ -118,15 +115,12 @@ export function findShortcutConflict(bindings: {
 export function browserShortcutFromKey(
   event: ShortcutKeyEvent,
   configured: ConfiguredBrowserShortcuts = {
-    tabSearch: "Ctrl+Shift+A",
-    recentlyClosed: "Ctrl+Shift+Y",
+    palette: "Ctrl+Shift+A",
   },
 ): BrowserShortcut | null {
   const normalized = eventShortcut(event);
-  if (normalized === normalizedShortcut(configured.tabSearch))
-    return "tab-search";
-  if (normalized === normalizedShortcut(configured.recentlyClosed))
-    return "recently-closed";
+  if (normalized === normalizedShortcut(configured.palette))
+    return "quick-switch";
 
   const key = event.key.toLowerCase();
   if (key === "escape") return "escape";
@@ -135,6 +129,7 @@ export function browserShortcutFromKey(
   if (key === "t") return event.shiftKey ? "restore-tab" : "new-tab";
   if (key === "l") return "focus-address";
   if (key === "w") return "close-tab";
+  if (key === "k") return "quick-switch";
   if (key === "h") return "history";
   if (key === "j") return "downloads";
   if (key === "d") return "bookmark";

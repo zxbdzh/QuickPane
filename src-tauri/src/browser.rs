@@ -24,17 +24,16 @@ use webview2_com::{
 };
 #[cfg(windows)]
 use windows::Win32::UI::Input::KeyboardAndMouse::{
-    GetKeyState, VK_0, VK_ADD, VK_CONTROL, VK_D, VK_F, VK_H, VK_J, VK_L, VK_MENU, VK_OEM_MINUS,
-    VK_OEM_PLUS, VK_SHIFT, VK_SUBTRACT, VK_T, VK_TAB, VK_W,
+    GetKeyState, VK_0, VK_ADD, VK_CONTROL, VK_D, VK_F, VK_H, VK_J, VK_K, VK_L, VK_MENU,
+    VK_OEM_MINUS, VK_OEM_PLUS, VK_SHIFT, VK_SUBTRACT, VK_T, VK_TAB, VK_W,
 };
 
 pub const CHROME_HEIGHT: f64 = 86.0;
 
-/// 代理设置 → WebView2 附加浏览器参数；system 模式返回 None（使用默认行为）。
 /// 代理分支会覆盖 Wry 默认参数，因此只补回 UI/PDF 兼容项，不关闭 SmartScreen。
 const WEBVIEW2_DEFAULT_ARGS: &str = "--disable-features=msWebOOUI,msPdfOOUI";
 
-const MUTE_TAB_SCRIPT: &str = r#"
+pub(crate) const MUTE_TAB_SCRIPT: &str = r#"
 window.__qpMuteObserver?.disconnect();
 const muteQuickPaneMedia = () => document.querySelectorAll('audio,video').forEach((media) => {
   if (!('qpMuted' in media.dataset)) media.dataset.qpMuted = media.muted ? '1' : '0';
@@ -45,7 +44,7 @@ window.__qpMuteObserver = new MutationObserver(muteQuickPaneMedia);
 window.__qpMuteObserver.observe(document.documentElement, { childList: true, subtree: true });
 "#;
 
-const UNMUTE_TAB_SCRIPT: &str = r#"
+pub(crate) const UNMUTE_TAB_SCRIPT: &str = r#"
 window.__qpMuteObserver?.disconnect();
 document.querySelectorAll('audio,video').forEach((media) => {
   media.muted = media.dataset.qpMuted === '1';
@@ -349,6 +348,7 @@ pub fn ensure_tab_webview(app: &AppHandle, tab_id: &str) -> Result<(), String> {
         if let Some(tab) = runtime.data.tabs.iter_mut().find(|tab| tab.id == tab_id) {
             tab.loaded = true;
             tab.loading = true;
+            tab.hibernated = false;
             if tab.title.is_empty() {
                 tab.title = title;
             }
@@ -406,6 +406,11 @@ pub fn create_tab(
                 );
                 return Err(error);
             }
+        } else {
+            // 激活新标签页：先扩幅再下发快照。否则 React 会在仍收缩为 86px 的
+            // 视口里先渲染一帧，随后扩幅导致页面在入场动画中途重新布局（晃动）。
+            // 浏览态主 WebView 透明，预扩幅期间网页照常从 UI 层下透出，视觉无缝。
+            let _ = set_shell_expanded(app, true);
         }
     }
     emit_snapshot(app);
@@ -485,6 +490,7 @@ pub async fn restore_closed_tab(
         restored.loading = false;
         restored.loaded = false;
         restored.muted = false;
+        restored.hibernated = false;
         runtime.data.tabs.push(restored);
         runtime.data.active_tab_id = Some(id.clone());
         runtime.shell_mode = url == "quickpane://newtab";
@@ -504,6 +510,9 @@ pub async fn restore_closed_tab(
             );
             return Err(error);
         }
+    } else {
+        // 恢复到新标签页：先扩幅再下发快照，避免收缩视口内的首帧布局跳动。
+        let _ = set_shell_expanded(app, true);
     }
     emit_snapshot(app);
     Ok(state.snapshot())
@@ -550,12 +559,17 @@ pub async fn activate_tab(app: &AppHandle, tab_id: &str) -> Result<AppSnapshot, 
             .find(|tab| tab.id == tab_id)
             .ok_or_else(|| "标签页不存在".to_string())?;
         tab.last_active_at = Utc::now();
+        tab.hibernated = false;
         runtime.data.active_tab_id = Some(tab_id.to_string());
         runtime.shell_mode = is_new_tab;
         Ok(())
     });
     result?;
 
+    if is_new_tab {
+        // 切到新标签页：先扩幅再下发快照，避免收缩视口内的首帧布局跳动。
+        let _ = set_shell_expanded(app, true);
+    }
     hide_all_tabs(app);
     if !is_new_tab {
         if let Err(error) = ensure_tab_webview(app, tab_id) {
@@ -796,6 +810,10 @@ pub async fn close_tab(app: &AppHandle, tab_id: &str) -> Result<AppSnapshot, Str
             }
         }
     }
+    if is_new_tab {
+        // 关闭后落在新标签页：先扩幅再下发快照，避免收缩视口内的首帧布局跳动。
+        let _ = set_shell_expanded(app, true);
+    }
     emit_snapshot(app);
     Ok(state.snapshot())
 }
@@ -926,6 +944,29 @@ pub fn resize_tabs(app: &AppHandle) {
 /// 浮层/页面/锁屏需要覆盖内容区时扩回满幅（UI 层在 z 序上方，浮层照常盖住网页）。
 pub fn set_shell_expanded(app: &AppHandle, expanded: bool) -> Result<(), String> {
     let collapsed = !expanded;
+    // 展开（浮层/锁屏/非浏览页）时把键盘焦点交给 chrome；
+    // 收缩回浏览态时交还活动标签，网页可立即接收键盘输入。
+    if let Some(shell) = app.get_webview("main") {
+        if expanded {
+            let _ = shell.set_focus();
+        } else if let Some(active) = app
+            .state::<AppState>()
+            .inner
+            .lock()
+            .ok()
+            .and_then(|runtime| {
+                if tab_content_should_be_visible(&runtime) {
+                    runtime.data.active_tab_id.clone()
+                } else {
+                    None
+                }
+            })
+        {
+            if let Some(webview) = app.get_webview(&tab_label(&active)) {
+                let _ = webview.set_focus();
+            }
+        }
+    }
     let changed = app
         .state::<AppState>()
         .inner
@@ -1082,10 +1123,8 @@ fn configured_tab_action(
             .join("+")
     };
     let current = canonical(&current);
-    if current == canonical(&runtime.data.settings.tab_search_shortcut) {
-        Some("tab-search")
-    } else if current == canonical(&runtime.data.settings.recently_closed_shortcut) {
-        Some("recently-closed")
+    if current == canonical(&runtime.data.settings.palette_shortcut) {
+        Some("quick-switch")
     } else {
         None
     }
@@ -1124,6 +1163,7 @@ fn install_tab_shortcuts(app: &AppHandle, webview: &tauri::Webview) -> Result<()
                             (true, true, key) if key == VK_T.0 => Some("restore-tab"),
                             (true, false, key) if key == VK_L.0 => Some("focus-address"),
                             (true, false, key) if key == VK_W.0 => Some("close-tab"),
+                            (true, false, key) if key == VK_K.0 => Some("quick-switch"),
                             (true, false, key) if key == VK_H.0 => Some("history"),
                             (true, false, key) if key == VK_J.0 => Some("downloads"),
                             (true, false, key) if key == VK_D.0 => Some("bookmark"),
@@ -1141,7 +1181,15 @@ fn install_tab_shortcuts(app: &AppHandle, webview: &tauri::Webview) -> Result<()
                     let Some(shortcut) = shortcut else {
                         return Ok(());
                     };
-                    unsafe { args.SetHandled(true)? };
+                    unsafe {
+                        args.SetHandled(true)?;
+                    };
+                    // 面板与地址栏动作的键盘输入在主 WebView：先转移 OS 焦点再转发。
+                    if matches!(shortcut, "quick-switch" | "focus-address") {
+                        if let Some(shell) = app.get_webview("main") {
+                            let _ = shell.set_focus();
+                        }
+                    }
                     let _ = app.emit_to(
                         tauri::EventTarget::webview_window("main"),
                         "browser-shortcut",
@@ -1357,6 +1405,7 @@ fn rollback_close_transition(
 }
 
 #[cfg(test)]
+#[allow(clippy::items_after_test_module)]
 mod tests {
     use super::*;
     use crate::state::PersistedData;
@@ -1538,27 +1587,73 @@ fn handle_download(app: &AppHandle, event: DownloadEvent<'_>) -> bool {
     }
 }
 
-pub fn freeze_idle_tabs(app: &AppHandle) {
+/// 标签休眠：后台标签超过阈值未使用时释放其 WebView（保留 url/标题，激活时重建）。
+/// 阈值为 0 时保留旧行为——仅对 5 分钟未用的标签暂停媒体播放。
+pub fn hibernate_idle_tabs(app: &AppHandle) {
+    let state = app.state::<AppState>();
+    let (threshold_minutes, active) = {
+        let Ok(guard) = state.inner.lock() else {
+            return;
+        };
+        (
+            guard.data.settings.tab_hibernation_minutes,
+            guard.data.active_tab_id.clone(),
+        )
+    };
+
     let cutoff = SystemTime::now()
         .checked_sub(std::time::Duration::from_secs(300))
         .and_then(|value| value.duration_since(SystemTime::UNIX_EPOCH).ok())
         .map(|value| value.as_secs() as i64)
         .unwrap_or_default();
-    let active = active_tab_id(app).ok();
-    let state = app.state::<AppState>();
+    let hibernate_cutoff = SystemTime::now()
+        .checked_sub(std::time::Duration::from_secs(
+            threshold_minutes as u64 * 60,
+        ))
+        .and_then(|value| value.duration_since(SystemTime::UNIX_EPOCH).ok())
+        .map(|value| value.as_secs() as i64)
+        .unwrap_or_default();
+
     let guard = match state.inner.lock() {
         Ok(guard) => guard,
         Err(_) => return,
     };
+    let mut candidates: Vec<String> = Vec::new();
     for tab in &guard.data.tabs {
-        if Some(&tab.id) == active.as_ref() || tab.pinned {
+        if Some(&tab.id) == active.as_ref() || tab.pinned || tab.url == "quickpane://newtab" {
             continue;
         }
-        if tab.last_active_at.timestamp() < cutoff {
+        if threshold_minutes > 0 {
+            if tab.last_active_at.timestamp() < hibernate_cutoff
+                && app.get_webview(&tab_label(&tab.id)).is_some()
+            {
+                candidates.push(tab.id.clone());
+            }
+        } else if tab.last_active_at.timestamp() < cutoff {
             if let Some(webview) = app.get_webview(&tab_label(&tab.id)) {
                 let _ = webview
                     .eval("document.querySelectorAll('audio,video').forEach((m)=>m.pause())");
             }
         }
     }
+    drop(guard);
+    if candidates.is_empty() {
+        return;
+    }
+
+    let _ = state.mutate(|runtime| {
+        for id in &candidates {
+            if let Some(tab) = runtime.data.tabs.iter_mut().find(|tab| &tab.id == id) {
+                tab.hibernated = true;
+                tab.loaded = false;
+                tab.loading = false;
+            }
+        }
+    });
+    for id in &candidates {
+        if let Some(webview) = app.get_webview(&tab_label(id)) {
+            let _ = webview.close();
+        }
+    }
+    emit_snapshot(app);
 }

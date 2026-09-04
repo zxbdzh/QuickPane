@@ -57,11 +57,8 @@ function SettingsPage({
   const hasPassword = snapshot.hasPassword;
   const [theme, setTheme] = useThemePreference();
   const [shortcut, setShortcut] = useState(settings.shortcut ?? "");
-  const [tabSearchShortcut, setTabSearchShortcut] = useState(
-    settings.tabSearchShortcut,
-  );
-  const [recentlyClosedShortcut, setRecentlyClosedShortcut] = useState(
-    settings.recentlyClosedShortcut,
+  const [paletteShortcut, setPaletteShortcut] = useState(
+    settings.paletteShortcut,
   );
   const [autostart, setAutostart] = useState(settings.autostart);
   const [homeUrl, setHomeUrl] = useState(settings.homeUrl);
@@ -80,6 +77,9 @@ function SettingsPage({
     settings.proxyMode ?? "system",
   );
   const [proxyUrl, setProxyUrl] = useState(settings.proxyUrl ?? "");
+  const [tabHibernationMinutes, setTabHibernationMinutes] = useState(
+    settings.tabHibernationMinutes ?? 15,
+  );
   const [password, setPassword] = useState("");
   const [currentPassword, setCurrentPassword] = useState("");
   const [revealPassword, setRevealPassword] = useState(false);
@@ -137,8 +137,7 @@ function SettingsPage({
     setSaveError(null);
     const conflict = findShortcutConflict({
       showHide: shortcut,
-      tabSearch: tabSearchShortcut,
-      recentlyClosed: recentlyClosedShortcut,
+      palette: paletteShortcut,
     });
     if (conflict) {
       setSaveState("error");
@@ -148,8 +147,7 @@ function SettingsPage({
     const next = await run(() =>
       api.updateSettings({
         shortcut: shortcut.trim() || null,
-        tabSearchShortcut: tabSearchShortcut.trim(),
-        recentlyClosedShortcut: recentlyClosedShortcut.trim(),
+        paletteShortcut: paletteShortcut.trim(),
         autostart,
         homeUrl,
         searchTemplate,
@@ -159,6 +157,7 @@ function SettingsPage({
         quickLinks,
         proxyMode,
         proxyUrl,
+        tabHibernationMinutes,
       }),
     );
     if (!next) {
@@ -167,8 +166,7 @@ function SettingsPage({
     }
     applySnapshot(next);
     setShortcut(next.data.settings.shortcut ?? "");
-    setTabSearchShortcut(next.data.settings.tabSearchShortcut);
-    setRecentlyClosedShortcut(next.data.settings.recentlyClosedShortcut);
+    setPaletteShortcut(next.data.settings.paletteShortcut);
     setSaveState("saved");
     window.setTimeout(() => setSaveState("idle"), 1600);
   };
@@ -253,25 +251,14 @@ function SettingsPage({
           </SettingsGroup>
 
           <SettingsGroup
-            title="标签页快捷键"
-            description="用于快速打开标签搜索和最近关闭的标签页面板。"
+            title="面板快捷键"
+            description="用于呼出统一快速切换面板（标签、书签、历史、最近关闭、工作区）；Ctrl+K 始终可用。"
           >
-            <Field label="搜索标签页">
+            <Field label="快速切换面板">
               <Input
-                value={tabSearchShortcut}
+                value={paletteShortcut}
                 onKeyDown={(event) =>
-                  captureShortcut(event, setTabSearchShortcut)
-                }
-                onChange={() => {}}
-                placeholder="点击后按下组合键"
-                className="w-full max-w-[280px]"
-              />
-            </Field>
-            <Field label="最近关闭的标签页">
-              <Input
-                value={recentlyClosedShortcut}
-                onKeyDown={(event) =>
-                  captureShortcut(event, setRecentlyClosedShortcut)
+                  captureShortcut(event, setPaletteShortcut)
                 }
                 onChange={() => {}}
                 placeholder="点击后按下组合键"
@@ -315,6 +302,32 @@ function SettingsPage({
                 />
                 <span className="text-xs text-muted-foreground">天</span>
               </div>
+            </Field>
+            <Field label="标签休眠">
+              <Select
+                value={String(tabHibernationMinutes)}
+                onValueChange={(value) =>
+                  setTabHibernationMinutes(Number(value))
+                }
+              >
+                <SelectTrigger
+                  size="sm"
+                  className="w-40"
+                  aria-label="标签休眠时间"
+                >
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="0">关闭</SelectItem>
+                  <SelectItem value="5">5 分钟</SelectItem>
+                  <SelectItem value="15">15 分钟</SelectItem>
+                  <SelectItem value="30">30 分钟</SelectItem>
+                  <SelectItem value="60">60 分钟</SelectItem>
+                </SelectContent>
+              </Select>
+              <p className="text-xs text-muted-foreground">
+                长时间未使用的后台标签自动释放内存，切换回来时重新加载；登录状态保留。
+              </p>
             </Field>
           </SettingsGroup>
 

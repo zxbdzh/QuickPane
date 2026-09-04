@@ -18,11 +18,13 @@ use crate::extensions::{self, ExtInfo};
 
 pub const DEFAULT_HOME: &str = "https://kaodes.com";
 pub const DEFAULT_SEARCH: &str = "https://cn.bing.com/search?q={query}";
-pub const DEFAULT_TAB_SEARCH_SHORTCUT: &str = "Ctrl+Shift+A";
-pub const DEFAULT_RECENTLY_CLOSED_SHORTCUT: &str = "Ctrl+Shift+Y";
+pub const DEFAULT_PALETTE_SHORTCUT: &str = "Ctrl+Shift+A";
+pub const DEFAULT_TAB_HIBERNATION_MINUTES: u32 = 15;
+pub const DEFAULT_WORKSPACE_NAME: &str = "默认工作区";
+pub const WORKSPACE_NAME_MAX_CHARS: usize = 24;
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase")]
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+#[serde(default, rename_all = "camelCase")]
 pub struct TabRecord {
     pub id: String,
     pub title: String,
@@ -31,6 +33,8 @@ pub struct TabRecord {
     pub loading: bool,
     pub loaded: bool,
     pub muted: bool,
+    /// 休眠中：后台 WebView 已释放，激活时按 url 重建。
+    pub hibernated: bool,
     pub created_at: DateTime<Utc>,
     pub last_active_at: DateTime<Utc>,
 }
@@ -46,6 +50,7 @@ impl TabRecord {
             loading: loaded,
             loaded,
             muted: false,
+            hibernated: false,
             created_at: now,
             last_active_at: now,
         }
@@ -90,12 +95,35 @@ pub struct QuickLink {
     pub url: String,
 }
 
+/// 工作区：暂存非当前工作区的标签集合与激活标签。
+/// 当前工作区的标签位于 PersistedData::tabs，切走时才写回这里的记录。
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct WorkspaceRecord {
+    pub id: String,
+    pub name: String,
+    pub tabs: Vec<TabRecord>,
+    pub active_tab_id: Option<String>,
+}
+
+impl WorkspaceRecord {
+    pub fn new(name: impl Into<String>) -> Self {
+        Self {
+            id: Uuid::new_v4().simple().to_string(),
+            name: name.into(),
+            tabs: Vec::new(),
+            active_tab_id: None,
+        }
+    }
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(default, rename_all = "camelCase")]
 pub struct Settings {
     pub shortcut: Option<String>,
-    pub tab_search_shortcut: String,
-    pub recently_closed_shortcut: String,
+    /// 快速切换面板快捷键（Ctrl+K 之外的可配置呼出键）。
+    #[serde(alias = "tabSearchShortcut")]
+    pub palette_shortcut: String,
     pub autostart: bool,
     pub home_url: String,
     pub search_template: String,
@@ -109,14 +137,15 @@ pub struct Settings {
     pub proxy_url: String,
     /// 固定到导航栏的扩展 id（Extensions/ 下的文件夹名）。
     pub pinned_extensions: Vec<String>,
+    /// 标签休眠阈值（分钟）：0 关闭，仅暂停媒体；后台标签超时后释放 WebView。
+    pub tab_hibernation_minutes: u32,
 }
 
 impl Default for Settings {
     fn default() -> Self {
         Self {
             shortcut: None,
-            tab_search_shortcut: DEFAULT_TAB_SEARCH_SHORTCUT.into(),
-            recently_closed_shortcut: DEFAULT_RECENTLY_CLOSED_SHORTCUT.into(),
+            palette_shortcut: DEFAULT_PALETTE_SHORTCUT.into(),
             autostart: false,
             home_url: DEFAULT_HOME.into(),
             search_template: DEFAULT_SEARCH.into(),
@@ -132,6 +161,7 @@ impl Default for Settings {
             proxy_mode: "system".into(),
             proxy_url: String::new(),
             pinned_extensions: Vec::new(),
+            tab_hibernation_minutes: DEFAULT_TAB_HIBERNATION_MINUTES,
         }
     }
 }
@@ -146,11 +176,15 @@ pub struct PersistedData {
     pub bookmarks: Vec<Bookmark>,
     pub downloads: Vec<DownloadRecord>,
     pub settings: Settings,
+    /// 全部工作区记录；当前工作区的 tabs 在切换离开时才写回。
+    pub workspaces: Vec<WorkspaceRecord>,
+    pub active_workspace_id: Option<String>,
 }
 
 impl Default for PersistedData {
     fn default() -> Self {
         let tab = TabRecord::new("quickpane://newtab".into(), "新标签页".into(), false);
+        let workspace = WorkspaceRecord::new(DEFAULT_WORKSPACE_NAME);
         Self {
             active_tab_id: Some(tab.id.clone()),
             tabs: vec![tab],
@@ -159,6 +193,8 @@ impl Default for PersistedData {
             bookmarks: Vec::new(),
             downloads: Vec::new(),
             settings: Settings::default(),
+            workspaces: vec![workspace.clone()],
+            active_workspace_id: Some(workspace.id),
         }
     }
 }
@@ -281,7 +317,7 @@ impl AppState {
         Ok(state)
     }
 
-    fn normalize(data: &mut PersistedData) {
+    pub fn normalize(data: &mut PersistedData) {
         data.history.retain(|entry| {
             entry.visited_at >= Utc::now() - Duration::days(data.settings.history_days as i64)
         });
@@ -291,6 +327,9 @@ impl AppState {
         ) {
             data.settings.auto_lock_after_hide_seconds = 0;
         }
+        if ![0, 5, 15, 30, 60].contains(&data.settings.tab_hibernation_minutes) {
+            data.settings.tab_hibernation_minutes = DEFAULT_TAB_HIBERNATION_MINUTES;
+        }
         data.history.truncate(5_000);
         data.downloads.truncate(500);
         data.recently_closed.truncate(20);
@@ -299,6 +338,15 @@ impl AppState {
             tab.loading = false;
             tab.loaded = false;
             tab.muted = false;
+            tab.hibernated = false;
+        }
+        for workspace in &mut data.workspaces {
+            for tab in &mut workspace.tabs {
+                tab.loading = false;
+                tab.loaded = false;
+                tab.muted = false;
+                tab.hibernated = false;
+            }
         }
 
         if data.tabs.is_empty() {
@@ -314,6 +362,22 @@ impl AppState {
             data.active_tab_id = data.tabs.first().map(|tab| tab.id.clone());
         }
         data.tabs.sort_by_key(|tab| !tab.pinned);
+
+        // 工作区兜底：旧数据无 workspaces 字段时补一个默认工作区并指向它。
+        if data.workspaces.is_empty() {
+            data.workspaces
+                .push(WorkspaceRecord::new(DEFAULT_WORKSPACE_NAME));
+        }
+        let workspace_valid = data
+            .active_workspace_id
+            .as_ref()
+            .is_some_and(|id| data.workspaces.iter().any(|workspace| &workspace.id == id));
+        if !workspace_valid {
+            data.active_workspace_id = data
+                .workspaces
+                .first()
+                .map(|workspace| workspace.id.clone());
+        }
     }
 
     pub fn snapshot(&self) -> AppSnapshot {
@@ -477,6 +541,84 @@ mod tests {
             data.active_tab_id.as_deref(),
             Some(data.tabs[0].id.as_str())
         );
+        assert_eq!(data.workspaces.len(), 1);
+        assert_eq!(data.workspaces[0].name, DEFAULT_WORKSPACE_NAME);
+        assert_eq!(
+            data.active_workspace_id.as_deref(),
+            Some(data.workspaces[0].id.as_str())
+        );
+    }
+
+    #[test]
+    fn legacy_data_without_workspaces_gets_default_workspace() {
+        // 旧版 quickpane.json 没有 workspaces 字段：serde 默认为空，load 后 normalize 兜底。
+        let legacy = serde_json::json!({
+            "tabs": [{
+                "id": "tab-1",
+                "title": "页面",
+                "url": "https://example.com",
+                "pinned": false,
+                "loading": false,
+                "loaded": false,
+                "muted": false,
+                "createdAt": "2026-01-01T00:00:00Z",
+                "lastActiveAt": "2026-01-01T00:00:00Z"
+            }],
+            "activeTabId": "tab-1",
+            "recentlyClosed": [],
+            "history": [],
+            "bookmarks": [],
+            "downloads": [],
+            "settings": {
+                "tabSearchShortcut": "Ctrl+Shift+A",
+                "recentlyClosedShortcut": "Ctrl+Shift+Y",
+                "autostart": false,
+                "homeUrl": "https://kaodes.com",
+                "searchTemplate": "https://cn.bing.com/search?q={query}",
+                "historyDays": 90,
+                "lockOnSystemLock": true,
+                "autoLockAfterHideSeconds": 0,
+                "quickLinks": [],
+                "proxyMode": "system",
+                "proxyUrl": "",
+                "pinnedExtensions": []
+            }
+        });
+        let mut data: PersistedData = serde_json::from_value(legacy).expect("parse legacy data");
+        // 旧字段 tabSearchShortcut 经 serde alias 迁移到 palette_shortcut。
+        assert_eq!(data.settings.palette_shortcut, "Ctrl+Shift+A");
+        // 容器级 serde(default)：旧数据缺 workspaces 时反序列化即落默认工作区；
+        // active_workspace_id 的默认值来自另一个 Default 实例，id 不匹配，由 normalize 修复。
+        assert_eq!(data.workspaces.len(), 1);
+        data.tabs[0].hibernated = true;
+        data.tabs[0].loaded = true;
+
+        AppState::normalize(&mut data);
+
+        assert_eq!(data.workspaces.len(), 1);
+        assert_eq!(data.workspaces[0].name, DEFAULT_WORKSPACE_NAME);
+        assert_eq!(
+            data.active_workspace_id.as_deref(),
+            Some(data.workspaces[0].id.as_str())
+        );
+        assert!(!data.tabs[0].hibernated);
+        assert!(!data.tabs[0].loaded);
+    }
+
+    #[test]
+    fn hibernation_threshold_normalizes_to_default() {
+        let mut data = PersistedData::default();
+        data.settings.tab_hibernation_minutes = 7;
+        AppState::normalize(&mut data);
+        assert_eq!(
+            data.settings.tab_hibernation_minutes,
+            DEFAULT_TAB_HIBERNATION_MINUTES
+        );
+        for allowed in [0, 5, 15, 30, 60] {
+            data.settings.tab_hibernation_minutes = allowed;
+            AppState::normalize(&mut data);
+            assert_eq!(data.settings.tab_hibernation_minutes, allowed);
+        }
     }
 
     #[test]

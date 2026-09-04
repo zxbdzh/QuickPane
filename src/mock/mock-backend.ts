@@ -3,6 +3,7 @@ import type {
   DownloadRecord,
   QuickLink,
   Settings,
+  TabRecord,
 } from "../types";
 
 /**
@@ -28,8 +29,7 @@ const QUICK_LINKS: QuickLink[] = [
 
 const DEFAULT_SETTINGS: Settings = {
   shortcut: "Alt+Q",
-  tabSearchShortcut: "Ctrl+Shift+A",
-  recentlyClosedShortcut: "Ctrl+Shift+Y",
+  paletteShortcut: "Ctrl+Shift+A",
   autostart: false,
   homeUrl: "https://kaodes.com",
   searchTemplate: "https://cn.bing.com/search?q={query}",
@@ -41,29 +41,58 @@ const DEFAULT_SETTINGS: Settings = {
   proxyMode: "system",
   proxyUrl: "",
   pinnedExtensions: [],
+  tabHibernationMinutes: 15,
 };
 
 const DOWNLOADS: DownloadRecord[] = [];
 
+function makeTab(url = "quickpane://newtab", title?: string): TabRecord {
+  const finalUrl =
+    url === "quickpane://newtab" ? url : normalizeInput(url);
+  return {
+    id: `tab-${Math.random().toString(36).slice(2, 8)}`,
+    title: title ?? (finalUrl === "quickpane://newtab" ? "新标签页" : titleFromUrl(finalUrl)),
+    url: finalUrl,
+    pinned: false,
+    loading: false,
+    loaded: true,
+    muted: false,
+    hibernated: false,
+    createdAt: new Date().toISOString(),
+    lastActiveAt: new Date().toISOString(),
+  };
+}
+
+/** 暂存模型：data.tabs 始终是当前工作区的标签，切走时写回工作区记录。 */
+function stashCurrentTabs() {
+  const active = snapshot.data.workspaces.find(
+    (workspace) => workspace.id === snapshot.data.activeWorkspaceId,
+  );
+  if (active) {
+    active.tabs = structuredClone(snapshot.data.tabs);
+    active.activeTabId = snapshot.data.activeTabId;
+  }
+}
+
+function loadWorkspaceTabs(workspaceId: string) {
+  const target = snapshot.data.workspaces.find(
+    (workspace) => workspace.id === workspaceId,
+  );
+  if (!target) throw new Error("工作区不存在");
+  if (target.tabs.length === 0) target.tabs = [makeTab()];
+  snapshot.data.tabs = structuredClone(target.tabs);
+  snapshot.data.activeTabId = target.activeTabId ?? target.tabs[0].id;
+  snapshot.data.activeWorkspaceId = workspaceId;
+}
+
 function makeSnapshot(): AppSnapshot {
   const bootLocked =
     new URLSearchParams(window.location.search).get("locked") === "1";
+  const initialTabs = [makeTab()];
   return {
     data: {
-      tabs: [
-        {
-          id: "tab-newtab",
-          title: "新标签页",
-          url: "quickpane://newtab",
-          pinned: false,
-          loading: false,
-          loaded: true,
-          muted: false,
-          createdAt: new Date().toISOString(),
-          lastActiveAt: new Date().toISOString(),
-        },
-      ],
-      activeTabId: "tab-newtab",
+      tabs: initialTabs,
+      activeTabId: initialTabs[0].id,
       recentlyClosed: [],
       history: [
         {
@@ -82,6 +111,41 @@ function makeSnapshot(): AppSnapshot {
       bookmarks: [],
       downloads: DOWNLOADS,
       settings: { ...DEFAULT_SETTINGS, passwordHash: null },
+      workspaces: [
+        { id: "ws-default", name: "默认工作区", tabs: [], activeTabId: null },
+        {
+          id: "ws-study",
+          name: "学习",
+          tabs: [
+            {
+              id: "tab-study-1",
+              title: "Rust 文档",
+              url: "https://doc.rust-lang.org",
+              pinned: false,
+              loading: false,
+              loaded: false,
+              muted: false,
+              hibernated: true,
+              createdAt: new Date().toISOString(),
+              lastActiveAt: new Date(Date.now() - 7200_000).toISOString(),
+            },
+            {
+              id: "tab-study-2",
+              title: "MDN Web Docs",
+              url: "https://developer.mozilla.org",
+              pinned: false,
+              loading: false,
+              loaded: true,
+              muted: false,
+              hibernated: false,
+              createdAt: new Date().toISOString(),
+              lastActiveAt: new Date(Date.now() - 3600_000).toISOString(),
+            },
+          ],
+          activeTabId: "tab-study-2",
+        },
+      ],
+      activeWorkspaceId: "ws-default",
     },
     locked: bootLocked,
     firstRun: false,
@@ -152,21 +216,7 @@ async function invoke(
       return structuredClone(snapshot);
     case "new_tab": {
       const url = (args.url as string | null) ?? "quickpane://newtab";
-      const finalUrl = url === "quickpane://newtab" ? url : normalizeInput(url);
-      const tab = {
-        id: `tab-${Math.random().toString(36).slice(2, 8)}`,
-        title:
-          finalUrl === "quickpane://newtab"
-            ? "新标签页"
-            : titleFromUrl(finalUrl),
-        url: finalUrl,
-        pinned: false,
-        loading: false,
-        loaded: true,
-        muted: false,
-        createdAt: new Date().toISOString(),
-        lastActiveAt: new Date().toISOString(),
-      };
+      const tab = makeTab(url);
       snapshot.data.tabs.push(tab);
       snapshot.data.tabs.sort(
         (left, right) => Number(right.pinned) - Number(left.pinned),
@@ -228,23 +278,159 @@ async function invoke(
         snapshot.data.recentlyClosed.unshift(removed);
       }
       if (snapshot.data.tabs.length === 0) {
-        snapshot.data.tabs.push({
-          id: `tab-${Math.random().toString(36).slice(2, 8)}`,
-          title: "新标签页",
-          url: "quickpane://newtab",
-          pinned: false,
-          loading: false,
-          loaded: true,
-          muted: false,
-          createdAt: new Date().toISOString(),
-          lastActiveAt: new Date().toISOString(),
-        });
+        snapshot.data.tabs.push(makeTab());
       }
       if (
         !snapshot.data.tabs.some((tab) => tab.id === snapshot.data.activeTabId)
       ) {
         snapshot.data.activeTabId =
           snapshot.data.tabs[snapshot.data.tabs.length - 1].id;
+      }
+      emitSnapshot();
+      return structuredClone(snapshot);
+    }
+    case "create_workspace": {
+      const name = (args.name as string).trim();
+      if (!name) throw new Error("工作区名称不能为空");
+      stashCurrentTabs();
+      const workspace = {
+        id: `ws-${Math.random().toString(36).slice(2, 8)}`,
+        name,
+        tabs: [makeTab()],
+        activeTabId: null as string | null,
+      };
+      workspace.activeTabId = workspace.tabs[0].id;
+      snapshot.data.workspaces.push(workspace);
+      snapshot.data.tabs = structuredClone(workspace.tabs);
+      snapshot.data.activeTabId = workspace.activeTabId;
+      snapshot.data.activeWorkspaceId = workspace.id;
+      emitSnapshot();
+      return structuredClone(snapshot);
+    }
+    case "rename_workspace": {
+      const workspace = snapshot.data.workspaces.find(
+        (item) => item.id === (args.workspaceId as string),
+      );
+      if (!workspace) throw new Error("工作区不存在");
+      const name = (args.name as string).trim();
+      if (!name) throw new Error("工作区名称不能为空");
+      workspace.name = name;
+      emitSnapshot();
+      return structuredClone(snapshot);
+    }
+    case "remove_workspace": {
+      const workspaceId = args.workspaceId as string;
+      if (snapshot.data.workspaces.length <= 1)
+        throw new Error("至少保留一个工作区");
+      if (workspaceId === snapshot.data.activeWorkspaceId)
+        throw new Error("不能删除当前工作区");
+      snapshot.data.workspaces = snapshot.data.workspaces.filter(
+        (item) => item.id !== workspaceId,
+      );
+      emitSnapshot();
+      return structuredClone(snapshot);
+    }
+    case "switch_workspace": {
+      const workspaceId = args.workspaceId as string;
+      if (workspaceId === snapshot.data.activeWorkspaceId)
+        return structuredClone(snapshot);
+      stashCurrentTabs();
+      loadWorkspaceTabs(workspaceId);
+      emitSnapshot();
+      return structuredClone(snapshot);
+    }
+    case "move_tab_to_workspace": {
+      const tabId = args.tabId as string;
+      const workspaceId = args.workspaceId as string;
+      if (workspaceId === snapshot.data.activeWorkspaceId)
+        throw new Error("标签已在当前工作区");
+      const target = snapshot.data.workspaces.find(
+        (item) => item.id === workspaceId,
+      );
+      if (!target) throw new Error("工作区不存在");
+      const index = snapshot.data.tabs.findIndex((tab) => tab.id === tabId);
+      if (index >= 0) {
+        const [moved] = snapshot.data.tabs.splice(index, 1);
+        moved.hibernated = false;
+        moved.loaded = false;
+        target.tabs.push(moved);
+      }
+      if (
+        !snapshot.data.tabs.some((tab) => tab.id === snapshot.data.activeTabId)
+      ) {
+        snapshot.data.activeTabId =
+          snapshot.data.tabs[Math.max(0, index - 1)]?.id ??
+          snapshot.data.tabs[0]?.id ??
+          null;
+      }
+      emitSnapshot();
+      return structuredClone(snapshot);
+    }
+    case "apply_tab_batch": {
+      const update = args.update as {
+        action: string;
+        tabIds: string[];
+        workspaceId?: string | null;
+      };
+      const ids = new Set(update.tabIds);
+      if (update.action === "close") {
+        const closed = snapshot.data.tabs.filter((tab) => ids.has(tab.id));
+        snapshot.data.tabs = snapshot.data.tabs.filter(
+          (tab) => !ids.has(tab.id),
+        );
+        snapshot.data.recentlyClosed = [
+          ...closed,
+          ...snapshot.data.recentlyClosed,
+        ].slice(0, 20);
+        if (snapshot.data.tabs.length === 0)
+          snapshot.data.tabs.push(makeTab());
+        if (
+          !snapshot.data.tabs.some(
+            (tab) => tab.id === snapshot.data.activeTabId,
+          )
+        ) {
+          snapshot.data.activeTabId = snapshot.data.tabs[0].id;
+        }
+      } else if (update.action === "bookmark") {
+        for (const tab of snapshot.data.tabs.filter(
+          (tab) => ids.has(tab.id) && /^https?:\/\//.test(tab.url),
+        )) {
+          if (snapshot.data.bookmarks.some((item) => item.url === tab.url))
+            continue;
+          snapshot.data.bookmarks.unshift({
+            id: `bm-${Math.random().toString(36).slice(2, 8)}`,
+            title: tab.title || tab.url,
+            url: tab.url,
+            createdAt: new Date().toISOString(),
+          });
+        }
+      } else if (update.action === "mute" || update.action === "unmute") {
+        for (const tab of snapshot.data.tabs) {
+          if (ids.has(tab.id)) tab.muted = update.action === "mute";
+        }
+      } else if (update.action === "move") {
+        const target = snapshot.data.workspaces.find(
+          (item) => item.id === update.workspaceId,
+        );
+        if (!target) throw new Error("工作区不存在");
+        const moved = snapshot.data.tabs.filter((tab) => ids.has(tab.id));
+        snapshot.data.tabs = snapshot.data.tabs.filter(
+          (tab) => !ids.has(tab.id),
+        );
+        for (const tab of moved) {
+          tab.hibernated = false;
+          tab.loaded = false;
+          target.tabs.push(tab);
+        }
+        if (snapshot.data.tabs.length === 0)
+          snapshot.data.tabs.push(makeTab());
+        if (
+          !snapshot.data.tabs.some(
+            (tab) => tab.id === snapshot.data.activeTabId,
+          )
+        ) {
+          snapshot.data.activeTabId = snapshot.data.tabs[0].id;
+        }
       }
       emitSnapshot();
       return structuredClone(snapshot);

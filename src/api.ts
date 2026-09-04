@@ -17,6 +17,8 @@ export type UpdateProgress = {
   total: number | null;
 };
 
+export type TabBatchAction = "close" | "bookmark" | "mute" | "unmute" | "move";
+
 export const api = {
   snapshot: () => invoke<AppSnapshot>("get_snapshot"),
   newTab: (url?: string, activate = true) =>
@@ -29,6 +31,24 @@ export const api = {
     invoke<AppSnapshot>("set_tab_muted", { tabId, muted }),
   restoreClosedTab: (tabId?: string) =>
     invoke<AppSnapshot>("restore_closed_tab", { tabId: tabId ?? null }),
+  createWorkspace: (name: string) =>
+    invoke<AppSnapshot>("create_workspace", { name }),
+  renameWorkspace: (workspaceId: string, name: string) =>
+    invoke<AppSnapshot>("rename_workspace", { workspaceId, name }),
+  removeWorkspace: (workspaceId: string) =>
+    invoke<AppSnapshot>("remove_workspace", { workspaceId }),
+  switchWorkspace: (workspaceId: string) =>
+    invoke<AppSnapshot>("switch_workspace", { workspaceId }),
+  moveTabToWorkspace: (tabId: string, workspaceId: string) =>
+    invoke<AppSnapshot>("move_tab_to_workspace", { tabId, workspaceId }),
+  applyTabBatch: (
+    action: TabBatchAction,
+    tabIds: string[],
+    workspaceId?: string,
+  ) =>
+    invoke<AppSnapshot>("apply_tab_batch", {
+      update: { action, tabIds, workspaceId: workspaceId ?? null },
+    }),
   navigate: (tabId: string, input: string) =>
     invoke<AppSnapshot>("navigate", { tabId, input }),
   reload: () => invoke<void>("reload"),
@@ -44,8 +64,7 @@ export const api = {
     invoke<AppSnapshot>("set_global_shortcut", { shortcut }),
   updateSettings: (update: {
     shortcut: string | null;
-    tabSearchShortcut: string;
-    recentlyClosedShortcut: string;
+    paletteShortcut: string;
     autostart: boolean;
     homeUrl: string;
     searchTemplate: string;
@@ -55,6 +74,7 @@ export const api = {
     quickLinks: QuickLink[];
     proxyMode: ProxyMode;
     proxyUrl: string;
+    tabHibernationMinutes: number;
   }) => invoke<AppSnapshot>("update_settings", { update }),
   addBookmark: (title: string, url: string) =>
     invoke<AppSnapshot>("add_bookmark", { title, url }),

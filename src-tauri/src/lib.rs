@@ -2,13 +2,14 @@ mod browser;
 mod extensions;
 mod state;
 mod windowing;
+mod workspace;
 
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::time::Duration;
 
 use browser::{
     activate_tab, browser_data_dir, close_tab, create_tab, emit_snapshot, ensure_tab_webview,
-    eval_active, extensions_dir, freeze_idle_tabs, navigate_tab, proxy_browser_args,
+    eval_active, extensions_dir, hibernate_idle_tabs, navigate_tab, proxy_browser_args,
     recreate_tab_webviews, reload_active, resize_tabs,
     restore_closed_tab as restore_closed_tab_record, set_all_muted, set_shell_mode,
     set_tab_muted as set_tab_muted_record, set_tab_pinned as set_tab_pinned_record, set_zoom,
@@ -84,6 +85,53 @@ fn set_tab_pinned(app: AppHandle, tab_id: String, pinned: bool) -> Result<AppSna
 async fn restore_closed_tab(app: AppHandle, tab_id: Option<String>) -> Result<AppSnapshot, String> {
     require_unlocked(&app)?;
     restore_closed_tab_record(&app, tab_id.as_deref()).await
+}
+
+#[tauri::command]
+async fn create_workspace(app: AppHandle, name: String) -> Result<AppSnapshot, String> {
+    require_unlocked(&app)?;
+    workspace::create_workspace(&app, &name)
+}
+
+#[tauri::command]
+async fn rename_workspace(
+    app: AppHandle,
+    workspace_id: String,
+    name: String,
+) -> Result<AppSnapshot, String> {
+    require_unlocked(&app)?;
+    workspace::rename_workspace(&app, &workspace_id, &name)
+}
+
+#[tauri::command]
+async fn remove_workspace(app: AppHandle, workspace_id: String) -> Result<AppSnapshot, String> {
+    require_unlocked(&app)?;
+    workspace::remove_workspace(&app, &workspace_id)
+}
+
+#[tauri::command]
+async fn switch_workspace(app: AppHandle, workspace_id: String) -> Result<AppSnapshot, String> {
+    require_unlocked(&app)?;
+    workspace::switch_workspace(&app, &workspace_id)
+}
+
+#[tauri::command]
+async fn move_tab_to_workspace(
+    app: AppHandle,
+    tab_id: String,
+    workspace_id: String,
+) -> Result<AppSnapshot, String> {
+    require_unlocked(&app)?;
+    workspace::move_tab_to_workspace(&app, &tab_id, &workspace_id)
+}
+
+#[tauri::command]
+async fn apply_tab_batch(
+    app: AppHandle,
+    update: workspace::TabBatchUpdate,
+) -> Result<AppSnapshot, String> {
+    require_unlocked(&app)?;
+    workspace::apply_tab_batch(&app, &update)
 }
 
 #[tauri::command]
@@ -192,8 +240,7 @@ fn set_global_shortcut(
 #[serde(rename_all = "camelCase")]
 struct SettingsUpdate {
     shortcut: Option<String>,
-    tab_search_shortcut: String,
-    recently_closed_shortcut: String,
+    palette_shortcut: String,
     autostart: bool,
     home_url: String,
     search_template: String,
@@ -203,6 +250,7 @@ struct SettingsUpdate {
     quick_links: Vec<QuickLink>,
     proxy_mode: String,
     proxy_url: String,
+    tab_hibernation_minutes: u32,
 }
 
 fn normalized_shortcut(value: &str) -> String {
@@ -215,10 +263,7 @@ fn normalized_shortcut(value: &str) -> String {
 }
 
 fn validate_panel_shortcuts(update: &SettingsUpdate) -> Result<(), String> {
-    let configured = [
-        (update.tab_search_shortcut.trim(), "搜索标签页"),
-        (update.recently_closed_shortcut.trim(), "最近关闭的标签页"),
-    ];
+    let configured = [(update.palette_shortcut.trim(), "快速切换面板")];
     for (shortcut, label) in configured {
         if shortcut.is_empty() {
             return Err(format!("{label}快捷键不能为空"));
@@ -252,6 +297,7 @@ fn validate_panel_shortcuts(update: &SettingsUpdate) -> Result<(), String> {
         "Ctrl+Shift+T",
         "Ctrl+L",
         "Ctrl+W",
+        "Ctrl+K",
         "Ctrl+H",
         "Ctrl+J",
         "Ctrl+D",
@@ -325,6 +371,9 @@ async fn update_settings(
     if !matches!(update.auto_lock_after_hide_seconds, 0 | 60 | 300 | 900) {
         return Err("隐藏后自动锁定时间无效".into());
     }
+    if ![0, 5, 15, 30, 60].contains(&update.tab_hibernation_minutes) {
+        return Err("标签休眠时间无效".into());
+    }
     if update.quick_links.len() > 12 {
         return Err("快捷站点最多 12 个".into());
     }
@@ -388,8 +437,7 @@ async fn update_settings(
     if let Err(error) = state.mutate(|runtime| {
         let settings = &mut runtime.data.settings;
         settings.shortcut = update.shortcut.clone();
-        settings.tab_search_shortcut = update.tab_search_shortcut.trim().to_string();
-        settings.recently_closed_shortcut = update.recently_closed_shortcut.trim().to_string();
+        settings.palette_shortcut = update.palette_shortcut.trim().to_string();
         settings.autostart = update.autostart;
         settings.home_url = home_url;
         settings.search_template = search_template;
@@ -399,6 +447,7 @@ async fn update_settings(
         settings.quick_links = quick_links;
         settings.proxy_mode = proxy_mode;
         settings.proxy_url = proxy_url;
+        settings.tab_hibernation_minutes = update.tab_hibernation_minutes;
     }) {
         if update.autostart != previous_settings.autostart {
             let _ = if previous_settings.autostart {
@@ -1017,6 +1066,12 @@ fn register_commands(builder: tauri::Builder<tauri::Wry>) -> tauri::Builder<taur
         remove_tab,
         set_tab_pinned,
         restore_closed_tab,
+        create_workspace,
+        rename_workspace,
+        remove_workspace,
+        switch_workspace,
+        move_tab_to_workspace,
+        apply_tab_batch,
         set_tab_muted,
         navigate,
         reload,
@@ -1099,14 +1154,14 @@ pub fn run() {
 
             let timer_app = handle.clone();
             std::thread::spawn(move || {
-                let mut freeze_ticks = 0;
+                let mut hibernate_ticks = 0;
                 loop {
                     std::thread::sleep(Duration::from_secs(1));
                     check_auto_lock(&timer_app);
-                    freeze_ticks += 1;
-                    if freeze_ticks >= 60 {
-                        freeze_idle_tabs(&timer_app);
-                        freeze_ticks = 0;
+                    hibernate_ticks += 1;
+                    if hibernate_ticks >= 60 {
+                        hibernate_idle_tabs(&timer_app);
+                        hibernate_ticks = 0;
                     }
                 }
             });

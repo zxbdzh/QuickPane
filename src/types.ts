@@ -6,8 +6,17 @@ export type TabRecord = {
   loading: boolean;
   loaded: boolean;
   muted: boolean;
+  /** 休眠中：后台 WebView 已释放，激活时按 url 重建 */
+  hibernated: boolean;
   createdAt: string;
   lastActiveAt: string;
+};
+
+export type Workspace = {
+  id: string;
+  name: string;
+  tabs: TabRecord[];
+  activeTabId: string | null;
 };
 
 export type HistoryEntry = {
@@ -55,8 +64,7 @@ export type BrowserExtension = {
 
 export type Settings = {
   shortcut: string | null;
-  tabSearchShortcut: string;
-  recentlyClosedShortcut: string;
+  paletteShortcut: string;
   autostart: boolean;
   homeUrl: string;
   searchTemplate: string;
@@ -68,6 +76,8 @@ export type Settings = {
   proxyMode: ProxyMode;
   proxyUrl: string;
   pinnedExtensions: string[];
+  /** 标签休眠阈值（分钟）：0 关闭，仅暂停媒体 */
+  tabHibernationMinutes: number;
 };
 
 export type PersistedData = {
@@ -78,6 +88,8 @@ export type PersistedData = {
   bookmarks: Bookmark[];
   downloads: DownloadRecord[];
   settings: Settings;
+  workspaces: Workspace[];
+  activeWorkspaceId: string | null;
 };
 
 export type AppSnapshot = {
@@ -97,4 +109,5 @@ export type ShellSection =
   | "downloads"
   | "extensions"
   | "settings"
+  | "tabs"
   | "lock";

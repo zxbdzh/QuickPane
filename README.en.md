@@ -64,7 +64,7 @@ Star QuickPane if it is useful to you. The count is updated automatically by Git
 ## Quick Start
 
 1. Download the Windows installer from [Releases](https://github.com/zxbdzh/QuickPane/releases/latest).
-2. Launch QuickPane and use the global hotkey configured in Settings.
+2. Launch QuickPane. The default shortcut for the quick switch panel is `Ctrl+Shift+A`; `Ctrl+K` is always available.
 3. Enter a URL or search query in the address bar.
 4. Press the hotkey again to hide the window and continue the session later.
 
@@ -72,11 +72,12 @@ Star QuickPane if it is useful to you. The count is updated automatically by Git
 
 The global show/hide shortcut is configurable in Settings. It must include at least one modifier and one regular key, such as `Alt+Q` or `Ctrl+Alt+B`.
 
-| Action | Shortcut |
-| --- | --- |
-| Show / hide QuickPane | Configured in Settings |
+| Switch to next tab | `Ctrl+Tab` |
+| Switch to previous tab | `Ctrl+Shift+Tab` |
 | New tab | `Ctrl+T` |
+| Restore closed tab | `Ctrl+Shift+T` |
 | Close current tab | `Ctrl+W` |
+| Quick switch panel | `Ctrl+K` or the configured panel shortcut |
 | Back | `Alt+Left` |
 | Forward | `Alt+Right` |
 | Reload | `Ctrl+R` |
@@ -84,8 +85,18 @@ The global show/hide shortcut is configurable in Settings. It must include at le
 | Bookmark current page | `Ctrl+D` |
 | Open history | `Ctrl+H` |
 | Open downloads | `Ctrl+J` |
+| Find in page | `Ctrl+F` |
+| Zoom in / out / reset | `Ctrl+=` / `Ctrl+-` / `Ctrl+0` |
 
 ## Features
+
+### Quick Switch and Workspaces
+
+- Search current tabs, recently closed tabs, workspaces, bookmarks and history in one quick switch panel.
+- Search Chinese titles by pinyin, move through results with the keyboard and press Enter to open an item.
+- Use `t` for tabs, `b` for bookmarks and `h` for history in the address bar; tab results can be copied, closed or moved to another workspace.
+- Create, rename, switch and delete persistent workspaces.
+- Filter tabs by title, URL or domain, then bookmark, mute, move or close them in batches.
 
 ### Appears when needed
 
@@ -97,15 +108,16 @@ The global show/hide shortcut is configurable in Settings. It must include at le
 ### Persistent browsing sessions
 
 - Multiple tabs in one window
-- Persistent tabs, history, bookmarks and recently closed pages
-- URL navigation and search from the address bar
+- Persistent tabs, history, bookmarks, recently closed pages and workspaces
+- URL navigation, search and tab / bookmark / history source search from the address bar
 - Regular web links and new-tab links inside the same browser session
-- Downloads and page zoom
+- Downloads, page zoom and background tab hibernation
 
 ### Browser capabilities
 
 - Powered by Windows WebView2
 - Install, enable, disable and remove unpacked browser extensions
+- Optional tab hibernation to release long-idle background WebViews
 - Optional Argon2id app lock on cold start and after Windows lock
 - Optional start with Windows
 - Signed automatic updates

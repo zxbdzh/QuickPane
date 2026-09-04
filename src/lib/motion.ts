@@ -44,6 +44,25 @@ export const overlay: Variants = {
   },
 };
 
+/** 居中命令面板：纱罩淡入淡出 */
+export const paletteBackdrop: Variants = {
+  initial: { opacity: 0 },
+  animate: { opacity: 1, transition: { duration: 0.14, ease: EASE_OUT } },
+  exit: { opacity: 0, transition: { duration: 0.1, ease: "easeIn" } },
+};
+
+/** 居中命令面板：面板自上方弹簧浮入，退场快速回落 */
+export const palettePanel: Variants = {
+  initial: { opacity: 0, scale: 0.97, y: 10 },
+  animate: { opacity: 1, scale: 1, y: 0, transition: SPRING.overlay },
+  exit: {
+    opacity: 0,
+    scale: 0.98,
+    y: 6,
+    transition: { duration: 0.1, ease: "easeIn" },
+  },
+};
+
 /** 错误横幅：顶部弹簧滑入，快速滑出 */
 export const bannerSlide: Variants = {
   initial: { opacity: 0, y: -14, scale: 0.98 },
@@ -84,10 +103,13 @@ export const revealContent: Variants = {
   visible: { opacity: 1, y: 0, transition: { ...SPRING.overlay, delay: 0.05 } },
 };
 
-/** 标签出入场：缩放弹出 / 宽度收窄驱动兄弟补位 */
+/** 标签出入场：淡入上滑 / 宽度收窄驱动兄弟补位。
+    入场刻意不用 scale：缩放会连带拉伸活动指示条（layoutId 子元素继承父级
+    transform），且与 layout 动画互相干扰产生"晃一下"；改用纯位移 + 无过冲
+    tween，配合 tab-strip 的 layout="position" 消除尺寸修正。 */
 export const tabMotion: Variants = {
-  initial: { opacity: 0, scale: 0.92 },
-  animate: { opacity: 1, scale: 1, transition: SPRING.list },
+  initial: { opacity: 0, y: 6 },
+  animate: { opacity: 1, y: 0, transition: { duration: 0.18, ease: EASE_OUT } },
   exit: {
     opacity: 0,
     width: 0,
