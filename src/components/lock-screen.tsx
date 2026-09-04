@@ -47,8 +47,8 @@ function LockScreen({ snapshot, applySnapshot, run }: {
 
   return (
     <div className="relative grid h-full min-h-0 place-items-center overflow-hidden bg-background px-6">
-      <div aria-hidden className="pointer-events-none absolute -top-40 -left-28 size-96 rounded-full bg-primary/10 blur-3xl" />
-      <div aria-hidden className="pointer-events-none absolute -right-32 -bottom-44 size-[28rem] rounded-full bg-primary/8 blur-3xl" />
+      <div aria-hidden className="pointer-events-none absolute -top-40 -left-28 size-96 animate-aurora-a rounded-full bg-primary/12 blur-3xl" />
+      <div aria-hidden className="pointer-events-none absolute -right-32 -bottom-44 size-[28rem] animate-aurora-b rounded-full bg-accent2/10 blur-3xl" />
 
       <motion.div variants={lockCard} initial="initial" animate="animate" className="relative w-[min(390px,100%)]">
         <motion.div

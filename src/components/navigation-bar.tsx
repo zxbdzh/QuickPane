@@ -1,28 +1,36 @@
 import {
   ArrowLeft,
   ArrowRight,
+  Bookmark,
   Clock3,
+  Download,
   Globe2,
+  History,
   Home,
   LoaderCircle,
+  Lock,
   Menu,
   PanelTopClose,
   Puzzle,
   RefreshCw,
+  Settings as SettingsIcon,
   ShieldCheck,
   Star,
 } from "lucide-react";
-import { useEffect, useRef, useState } from "react";
-import type { FormEvent, KeyboardEvent, RefObject } from "react";
+import { AnimatePresence, motion } from "motion/react";
+import { useEffect, useState } from "react";
+import type { FormEvent, KeyboardEvent, ReactNode, RefObject } from "react";
 
 import type { AddressSuggestion } from "../lib/address-suggestions";
-import type { BrowserExtension, TabRecord } from "../types";
+import type { ShellSection, BrowserExtension, TabRecord } from "../types";
 import { cn } from "../lib/utils";
+import { overlay } from "../lib/motion";
 import { Button } from "./ui/button";
 import { IconButton } from "./icon-button";
+import { Kbd } from "./ui/kbd";
 
 /** 导航栏：高 54px（与标签栏合计 86px，对应 Rust 侧 CHROME_HEIGHT） */
-function NavigationBar({ activeTab, address, onAddress, onSubmit, addressRef, suggestions, onSuggestion, onSuggestionsOpenChange, windowVisible, bookmarked, onBookmark, onBack, onForward, onReload, onHome, onHide, onOpenMenu, pinnedExtensions, onExtensionClick }: {
+function NavigationBar({ activeTab, address, onAddress, onSubmit, addressRef, suggestions, onSuggestion, onOverlayOpenChange, windowVisible, bookmarked, onBookmark, onBack, onForward, onReload, onHome, onHide, hasPassword, onOpenSection, onLockNow, pinnedExtensions, onExtensionClick }: {
   activeTab: TabRecord | null;
   address: string;
   onAddress: (value: string) => void;
@@ -30,7 +38,8 @@ function NavigationBar({ activeTab, address, onAddress, onSubmit, addressRef, su
   addressRef: RefObject<HTMLInputElement | null>;
   suggestions: AddressSuggestion[];
   onSuggestion: (suggestion: AddressSuggestion) => void;
-  onSuggestionsOpenChange: (open: boolean) => void;
+  /** 地址下拉或菜单任一浮层开合时上报：驱动 main WebView 扩幅/收缩。 */
+  onOverlayOpenChange: (open: boolean) => void;
   windowVisible: boolean;
   bookmarked: boolean;
   onBookmark: () => void;
@@ -39,37 +48,58 @@ function NavigationBar({ activeTab, address, onAddress, onSubmit, addressRef, su
   onReload: () => void;
   onHome: () => void;
   onHide: () => void;
-  onOpenMenu: (anchor: { x: number; y: number }) => void;
+  hasPassword: boolean;
+  onOpenSection: (section: ShellSection) => void;
+  onLockNow: () => void;
   pinnedExtensions: BrowserExtension[];
   onExtensionClick: (extension: BrowserExtension, anchor: { x: number; y: number }) => void;
 }) {
   const [suggestionsRequested, setSuggestionsRequested] = useState(false);
   const [selectedSuggestion, setSelectedSuggestion] = useState(-1);
+  const [menuOpen, setMenuOpen] = useState(false);
   const suggestionsOpen = suggestionsRequested && suggestions.length > 0;
-  const reportedOpen = useRef(false);
   const secure = address.startsWith("https://");
 
   useEffect(() => {
     setSuggestionsRequested(false);
     setSelectedSuggestion(-1);
+    setMenuOpen(false);
   }, [activeTab?.id, activeTab?.url]);
 
   useEffect(() => {
     if (!windowVisible) {
       setSuggestionsRequested(false);
       setSelectedSuggestion(-1);
+      setMenuOpen(false);
     }
   }, [windowVisible]);
 
+  // 任一浮层（地址下拉/菜单）开合都上报：true → main WebView 扩幅盖网页；false → 收缩还网页。
+  const overlayOpen = suggestionsOpen || menuOpen;
   useEffect(() => {
-    if (selectedSuggestion >= suggestions.length) setSelectedSuggestion(-1);
-  }, [selectedSuggestion, suggestions.length]);
+    onOverlayOpenChange(overlayOpen);
+  }, [onOverlayOpenChange, overlayOpen]);
 
+  // 菜单下拉：点击外部即收起（下拉本体在 UI 层内，天然位于网页之上）。
   useEffect(() => {
-    if (reportedOpen.current === suggestionsOpen) return;
-    reportedOpen.current = suggestionsOpen;
-    onSuggestionsOpenChange(suggestionsOpen);
-  }, [onSuggestionsOpenChange, suggestionsOpen]);
+    if (!menuOpen) return;
+    const onPointerDown = (event: PointerEvent) => {
+      if (event.target instanceof Element && !event.target.closest("[data-qp-menu]")) {
+        setMenuOpen(false);
+      }
+    };
+    document.addEventListener("pointerdown", onPointerDown);
+    return () => document.removeEventListener("pointerdown", onPointerDown);
+  }, [menuOpen]);
+
+  const menuItems: Array<{ key: string; icon: ReactNode; label: string; hint?: string; action: () => void }> = [
+    { key: "history", icon: <History className="size-4" />, label: "历史记录", hint: "Ctrl+H", action: () => onOpenSection("history") },
+    { key: "bookmarks", icon: <Bookmark className="size-4" />, label: "书签", action: () => onOpenSection("bookmarks") },
+    { key: "downloads", icon: <Download className="size-4" />, label: "下载", hint: "Ctrl+J", action: () => onOpenSection("downloads") },
+    ...(hasPassword ? [{ key: "lock", icon: <Lock className="size-4" />, label: "立即锁定", action: onLockNow }] : []),
+    { key: "extensions", icon: <Puzzle className="size-4" />, label: "扩展", action: () => onOpenSection("extensions") },
+    { key: "settings", icon: <SettingsIcon className="size-4" />, label: "设置", action: () => onOpenSection("settings") },
+  ];
 
   const closeSuggestions = () => {
     setSuggestionsRequested(false);
@@ -149,9 +179,9 @@ function NavigationBar({ activeTab, address, onAddress, onSubmit, addressRef, su
           aria-controls="address-suggestions"
           aria-expanded={suggestionsOpen}
           aria-activedescendant={selectedSuggestion >= 0 ? `address-suggestion-${selectedSuggestion}` : undefined}
-          className="h-full min-w-0 flex-1 bg-transparent text-sm text-foreground outline-none placeholder:text-faint"
+          className="h-full min-w-0 flex-1 bg-transparent font-mono text-sm text-foreground outline-none placeholder:font-sans placeholder:text-faint"
         />
-        {activeTab?.loading ? <LoaderCircle className="size-4 shrink-0 animate-spin text-muted-foreground" /> : null}
+        {activeTab?.loading ? <LoaderCircle className="size-4 shrink-0 animate-spin text-accent2" /> : null}
         <button
           type="button"
           onClick={onBookmark}
@@ -165,47 +195,53 @@ function NavigationBar({ activeTab, address, onAddress, onSubmit, addressRef, su
           <Star className="size-4" fill={bookmarked ? "currentColor" : "none"} />
         </button>
 
-        {suggestionsOpen ? (
-          <div
-            id="address-suggestions"
-            role="listbox"
-            aria-label="本地浏览建议"
-            className="absolute top-[calc(100%+6px)] right-0 left-0 max-h-[360px] overflow-y-auto rounded-md border bg-popover p-1 shadow-popover"
-          >
-            {suggestions.map((suggestion, index) => (
-              <button
-                id={`address-suggestion-${index}`}
-                key={`${suggestion.source}:${suggestion.url}`}
-                type="button"
-                role="option"
-                tabIndex={-1}
-                aria-selected={index === selectedSuggestion}
-                onMouseDown={(event) => event.preventDefault()}
-                onMouseEnter={() => setSelectedSuggestion(index)}
-                onClick={() => chooseSuggestion(suggestion)}
-                className={cn(
-                  "grid h-11 w-full grid-cols-[20px_minmax(0,1fr)_auto] items-center gap-2 rounded-sm px-2 text-left outline-none",
-                  index === selectedSuggestion && "bg-accent text-accent-foreground",
-                )}
-              >
-                {suggestion.source === "tab" ? (
-                  <Globe2 className="size-4 text-muted-foreground" />
-                ) : suggestion.source === "history" ? (
-                  <Clock3 className="size-4 text-muted-foreground" />
-                ) : suggestion.source === "bookmark" ? (
-                  <Star className="size-4 text-muted-foreground" />
-                ) : (
-                  <Home className="size-4 text-muted-foreground" />
-                )}
-                <span className="min-w-0">
-                  <strong className="block truncate text-sm font-medium">{suggestion.title}</strong>
-                  <small className="block truncate text-xs text-muted-foreground">{suggestion.url}</small>
-                </span>
-                <span className="max-w-28 truncate text-xs text-faint">{suggestion.host}</span>
-              </button>
-            ))}
-          </div>
-        ) : null}
+        <AnimatePresence initial={false}>
+          {suggestionsOpen ? (
+            <motion.div
+              id="address-suggestions"
+              role="listbox"
+              aria-label="本地浏览建议"
+              variants={overlay}
+              initial="initial"
+              animate="animate"
+              exit="exit"
+              className="absolute top-[calc(100%+6px)] right-0 left-0 max-h-[360px] overflow-y-auto rounded-md border bg-popover p-1 shadow-popover"
+            >
+              {suggestions.map((suggestion, index) => (
+                <button
+                  id={`address-suggestion-${index}`}
+                  key={`${suggestion.source}:${suggestion.url}`}
+                  type="button"
+                  role="option"
+                  tabIndex={-1}
+                  aria-selected={index === selectedSuggestion}
+                  onMouseDown={(event) => event.preventDefault()}
+                  onMouseEnter={() => setSelectedSuggestion(index)}
+                  onClick={() => chooseSuggestion(suggestion)}
+                  className={cn(
+                    "grid h-11 w-full grid-cols-[20px_minmax(0,1fr)_auto] items-center gap-2 rounded-sm px-2 text-left outline-none",
+                    index === selectedSuggestion && "bg-soft text-on-soft",
+                  )}
+                >
+                  {suggestion.source === "tab" ? (
+                    <Globe2 className="size-4 text-muted-foreground" />
+                  ) : suggestion.source === "history" ? (
+                    <Clock3 className="size-4 text-muted-foreground" />
+                  ) : suggestion.source === "bookmark" ? (
+                    <Star className="size-4 text-muted-foreground" />
+                  ) : (
+                    <Home className="size-4 text-muted-foreground" />
+                  )}
+                  <span className="min-w-0">
+                    <strong className="block truncate text-sm font-medium">{suggestion.title}</strong>
+                    <small className="block truncate font-mono text-xs text-muted-foreground">{suggestion.url}</small>
+                  </span>
+                  <span className="max-w-28 truncate font-mono text-xs text-faint">{suggestion.host}</span>
+                </button>
+              ))}
+            </motion.div>
+          ) : null}
+        </AnimatePresence>
       </form>
 
       <div className="flex select-none items-center gap-0.5">
@@ -229,18 +265,62 @@ function NavigationBar({ activeTab, address, onAddress, onSubmit, addressRef, su
           </button>
         ))}
         <IconButton label="隐藏窗口" onClick={onHide}><PanelTopClose className="size-4" /></IconButton>
-        <Button
-          variant="ghost"
-          size="icon"
-          aria-label="QuickPane 菜单"
-          className="text-muted-foreground hover:text-foreground"
-          onClick={(event) => {
-            const rect = event.currentTarget.getBoundingClientRect();
-            onOpenMenu({ x: rect.left, y: rect.bottom + 6 });
+        <div
+          data-qp-menu
+          className="relative"
+          onKeyDown={(event) => {
+            if (event.key === "Escape" && menuOpen) {
+              event.preventDefault();
+              event.stopPropagation();
+              setMenuOpen(false);
+            }
           }}
         >
-          <Menu className="size-[18px]" />
-        </Button>
+          <Button
+            variant="ghost"
+            size="icon"
+            aria-label="QuickPane 菜单"
+            aria-haspopup="menu"
+            aria-expanded={menuOpen}
+            className={cn(
+              "text-muted-foreground hover:text-foreground",
+              menuOpen && "bg-muted text-foreground",
+            )}
+            onClick={() => setMenuOpen((open) => !open)}
+          >
+            <Menu className="size-[18px]" />
+          </Button>
+          <AnimatePresence initial={false}>
+            {menuOpen ? (
+              <motion.div
+                role="menu"
+                aria-label="QuickPane 菜单"
+                variants={overlay}
+                initial="initial"
+                animate="animate"
+                exit="exit"
+                className="absolute top-[calc(100%+6px)] right-0 z-40 w-56 overflow-hidden rounded-lg border border-border bg-popover p-1.5 text-popover-foreground shadow-popover"
+              >
+                {menuItems.map((item) => (
+                  <button
+                    type="button"
+                    role="menuitem"
+                    key={item.key}
+                    onClick={() => {
+                      setMenuOpen(false);
+                      item.action();
+                    }}
+                    className="flex h-9 w-full items-center gap-2.5 rounded-md px-2.5 text-sm outline-none transition-colors hover:bg-muted focus-visible:bg-muted"
+                  >
+                    {item.icon}
+                    {item.label}
+                    {item.hint ? <Kbd className="ml-auto">{item.hint}</Kbd> : null}
+                  </button>
+                ))}
+              </motion.div>
+            ) : null}
+          </AnimatePresence>
+        </div>
       </div>
     </nav>
   );

@@ -1,25 +1,29 @@
+@import "@fontsource/ibm-plex-mono/latin-400.css";
+@import "@fontsource/ibm-plex-mono/latin-500.css";
+@import "@fontsource/ibm-plex-mono/latin-600.css";
 @import "tailwindcss";
 
 /* class 策略暗色变体（shadcn 标准做法） */
 @custom-variant dark (&:where(.dark, .dark *));
 
 /* ---------------------------------------------------------------------------
- * 设计 token
- * 中性灰阶 10 级（冷灰），语义色经 :root / .dark 映射到 shadcn 变量。
- * 强调色为单一低饱和蓝；语义色只用于状态（错误红 / 成功绿）。
+ * 设计 token ——「Volt & Ink / 精密仪器」
+ * 中性灰阶 10 级（冷灰，hue 260 与墨色底协调）。
+ * 双强调色：钴蓝 = 交互/主操作；琥珀 = 活跃/当前状态（指示条、加载、选中标记）。
+ * 等宽字体承载技术细节：URL、host、kbd、计数、版本号。
  * ------------------------------------------------------------------------- */
 @theme {
   /* 10 级中性灰阶 */
-  --color-gray-50: oklch(0.977 0.002 255);
-  --color-gray-100: oklch(0.955 0.003 255);
-  --color-gray-200: oklch(0.912 0.004 255);
-  --color-gray-300: oklch(0.868 0.005 255);
-  --color-gray-400: oklch(0.71 0.007 255);
-  --color-gray-500: oklch(0.62 0.008 255);
-  --color-gray-600: oklch(0.53 0.009 255);
-  --color-gray-700: oklch(0.44 0.008 255);
-  --color-gray-800: oklch(0.33 0.006 255);
-  --color-gray-900: oklch(0.25 0.005 255);
+  --color-gray-50: oklch(0.977 0.002 260);
+  --color-gray-100: oklch(0.955 0.003 260);
+  --color-gray-200: oklch(0.912 0.004 260);
+  --color-gray-300: oklch(0.868 0.005 260);
+  --color-gray-400: oklch(0.71 0.007 260);
+  --color-gray-500: oklch(0.62 0.008 260);
+  --color-gray-600: oklch(0.53 0.009 260);
+  --color-gray-700: oklch(0.44 0.008 260);
+  --color-gray-800: oklch(0.33 0.006 260);
+  --color-gray-900: oklch(0.25 0.005 260);
 
   /* 圆角三档：容器 12 / 卡片·输入框 8 / 小控件 6 */
   --radius-sm: 6px;
@@ -39,76 +43,178 @@
   --text-xl--line-height: 1.3;
 
   --font-sans: "Segoe UI Variable Text", "Segoe UI", "Microsoft YaHei UI", system-ui, sans-serif;
+  --font-mono: "IBM Plex Mono", "Cascadia Mono", Consolas, ui-monospace, monospace;
 
   /* 动效基准：100-150ms ease-out，最长 300ms */
   --default-transition-duration: 150ms;
   --default-transition-timing-function: cubic-bezier(0.2, 0, 0, 1);
+
+  /* -----------------------------------------------------------------
+   * Radix 浮层开关场：data-[state=open/closed] + animationend 机制。
+   * keyframes 只动画 opacity/scale/translate 独立属性，不碰 transform，
+   * 以免覆盖 popper 定位与常驻位移类。
+   * ----------------------------------------------------------------- */
+  --animate-overlay-pop: overlay-pop 140ms cubic-bezier(0.175, 0.885, 0.32, 1.08);
+  --animate-overlay-rise: overlay-rise 140ms cubic-bezier(0.175, 0.885, 0.32, 1.08);
+  --animate-overlay-fade: overlay-fade 90ms cubic-bezier(0.4, 0, 1, 1);
+  --animate-tooltip-in: overlay-rise 100ms cubic-bezier(0.175, 0.885, 0.32, 1.08);
+  --animate-scrim-in: scrim-in 140ms ease-out;
+  --animate-scrim-out: scrim-out 100ms ease-in;
+  --animate-shimmer: shimmer 1.6s linear infinite;
+  --animate-aurora-a: aurora-a 28s ease-in-out infinite alternate;
+  --animate-aurora-b: aurora-b 36s ease-in-out infinite alternate;
+
+  /* 入场只含 opacity+scale（用于有常驻 translate 的 select/alert 内容） */
+  @keyframes overlay-pop {
+    from {
+      opacity: 0;
+      scale: 0.96;
+    }
+    to {
+      opacity: 1;
+      scale: 1;
+    }
+  }
+
+  /* 入场含 3px 上浮（用于无常驻 translate 的 dropdown/context/tooltip） */
+  @keyframes overlay-rise {
+    from {
+      opacity: 0;
+      scale: 0.96;
+      translate: 0 -3px;
+    }
+    to {
+      opacity: 1;
+      scale: 1;
+      translate: 0 0;
+    }
+  }
+
+  /* 统一退场：永远比入场快 */
+  @keyframes overlay-fade {
+    to {
+      opacity: 0;
+      scale: 0.98;
+    }
+  }
+
+  @keyframes scrim-in {
+    from {
+      opacity: 0;
+    }
+  }
+
+  @keyframes scrim-out {
+    to {
+      opacity: 0;
+    }
+  }
+
+  @keyframes shimmer {
+    from {
+      translate: -100% 0;
+    }
+    to {
+      translate: 100% 0;
+    }
+  }
+
+  /* 极光 orb：合成层 transform 漂移（钴蓝 / 琥珀各一枚） */
+  @keyframes aurora-a {
+    from {
+      translate: 0 0;
+      scale: 1;
+    }
+    to {
+      translate: 4% -3%;
+      scale: 1.1;
+    }
+  }
+
+  @keyframes aurora-b {
+    from {
+      translate: 0 0;
+      scale: 1.05;
+      rotate: 0deg;
+    }
+    to {
+      translate: -3% 4%;
+      scale: 0.95;
+      rotate: 8deg;
+    }
+  }
 }
 
-/* 语义变量：亮色（背景不纯白，表面近白） */
+/* 语义变量：亮色（纸白背景，表面近白） */
 :root {
-  --background: oklch(0.972 0.002 255);
-  --foreground: oklch(0.245 0.01 255);
-  --surface: oklch(0.991 0.002 255);
-  --chrome: oklch(0.949 0.003 255);
-  --muted: oklch(0.955 0.003 255);
-  --muted-foreground: oklch(0.505 0.01 255);
-  --faint: oklch(0.62 0.008 255);
-  --card: oklch(0.994 0.002 255);
-  --popover: oklch(0.998 0.001 255);
-  --primary: oklch(0.545 0.128 255);
-  --primary-foreground: oklch(0.985 0.005 255);
-  --soft: oklch(0.951 0.024 255);
-  --on-soft: oklch(0.45 0.13 255);
-  --secondary: oklch(0.955 0.003 255);
-  --secondary-foreground: oklch(0.35 0.01 255);
-  --accent: oklch(0.945 0.004 255);
-  --accent-foreground: oklch(0.25 0.01 255);
+  --background: oklch(0.972 0.002 260);
+  --foreground: oklch(0.245 0.01 260);
+  --surface: oklch(0.991 0.002 260);
+  --chrome: oklch(0.949 0.003 260);
+  --muted: oklch(0.955 0.003 260);
+  --muted-foreground: oklch(0.505 0.01 260);
+  --faint: oklch(0.62 0.008 260);
+  --card: oklch(0.994 0.002 260);
+  --popover: oklch(0.998 0.001 260);
+  --primary: oklch(0.55 0.19 262);
+  --primary-foreground: oklch(0.985 0.01 262);
+  --soft: oklch(0.951 0.03 262);
+  --on-soft: oklch(0.45 0.15 262);
+  --secondary: oklch(0.955 0.003 260);
+  --secondary-foreground: oklch(0.35 0.01 260);
+  --accent: oklch(0.945 0.004 260);
+  --accent-foreground: oklch(0.25 0.01 260);
+  --accent2: oklch(0.8 0.15 82);
+  --on-accent2: oklch(0.3 0.06 85);
   --destructive: oklch(0.55 0.17 27);
   --destructive-foreground: oklch(0.985 0.01 27);
   --destructive-soft: oklch(0.965 0.022 27);
   --destructive-border: oklch(0.87 0.05 27);
   --success: oklch(0.55 0.13 152);
-  --border: oklch(0.902 0.004 255);
-  --input: oklch(0.88 0.005 255);
-  --ring: oklch(0.545 0.128 255);
+  --border: oklch(0.902 0.004 260);
+  --input: oklch(0.88 0.005 260);
+  --ring: oklch(0.55 0.19 262);
   --elevation-popover: 0 1px 2px oklch(0 0 0 / 0.05), 0 8px 24px oklch(0 0 0 / 0.14);
+  --elevation-raised: 0 1px 2px oklch(0 0 0 / 0.05), 0 3px 10px oklch(0 0 0 / 0.08);
   --elevation-glow: 0 0 0 3px color-mix(in oklab, var(--ring) 20%, transparent);
   --elevation-glow-strong: 0 0 0 3px color-mix(in oklab, var(--ring) 20%, transparent),
-    0 0 12px color-mix(in oklab, var(--ring) 22%, transparent);
+    0 0 20px color-mix(in oklab, var(--ring) 25%, transparent);
 }
 
-/* 语义变量：暗色（表面 #121212 级别，不纯黑） */
+/* 语义变量：暗色（蓝调墨色，表面按层级整体重新分层） */
 .dark {
-  --background: oklch(0.208 0.005 255);
-  --foreground: oklch(0.928 0.003 255);
-  --surface: oklch(0.25 0.005 255);
-  --chrome: oklch(0.228 0.005 255);
-  --muted: oklch(0.29 0.005 255);
-  --muted-foreground: oklch(0.715 0.007 255);
-  --faint: oklch(0.55 0.008 255);
-  --card: oklch(0.262 0.005 255);
-  --popover: oklch(0.283 0.006 255);
-  --primary: oklch(0.68 0.115 255);
-  --primary-foreground: oklch(0.16 0.03 255);
-  --soft: oklch(0.315 0.05 255);
-  --on-soft: oklch(0.78 0.09 255);
-  --secondary: oklch(0.29 0.005 255);
-  --secondary-foreground: oklch(0.9 0.004 255);
-  --accent: oklch(0.3 0.006 255);
-  --accent-foreground: oklch(0.93 0.003 255);
+  --background: oklch(0.16 0.012 260);
+  --foreground: oklch(0.928 0.003 260);
+  --surface: oklch(0.205 0.013 262);
+  --chrome: oklch(0.185 0.012 260);
+  --muted: oklch(0.24 0.014 262);
+  --muted-foreground: oklch(0.715 0.007 262);
+  --faint: oklch(0.55 0.008 262);
+  --card: oklch(0.225 0.014 262);
+  --popover: oklch(0.245 0.015 262);
+  --primary: oklch(0.7 0.155 262);
+  --primary-foreground: oklch(0.17 0.04 262);
+  --soft: oklch(0.3 0.055 262);
+  --on-soft: oklch(0.8 0.1 262);
+  --secondary: oklch(0.24 0.014 262);
+  --secondary-foreground: oklch(0.9 0.004 262);
+  --accent: oklch(0.26 0.014 262);
+  --accent-foreground: oklch(0.93 0.003 262);
+  --accent2: oklch(0.85 0.13 88);
+  --on-accent2: oklch(0.24 0.05 85);
   --destructive: oklch(0.68 0.15 27);
   --destructive-foreground: oklch(0.16 0.03 27);
   --destructive-soft: oklch(0.28 0.05 27);
   --destructive-border: oklch(0.38 0.07 27);
   --success: oklch(0.72 0.13 152);
-  --border: oklch(0.325 0.006 255);
-  --input: oklch(0.31 0.006 255);
-  --ring: oklch(0.68 0.115 255);
+  --border: oklch(0.3 0.014 262);
+  --input: oklch(0.28 0.014 262);
+  --ring: oklch(0.7 0.155 262);
   --elevation-popover: 0 1px 2px oklch(0 0 0 / 0.4), 0 8px 24px oklch(0 0 0 / 0.5);
+  --elevation-raised: 0 1px 2px oklch(0 0 0 / 0.45), inset 0 1px 0 oklch(1 0 0 / 0.05);
   --elevation-glow: 0 0 0 3px color-mix(in oklab, var(--ring) 26%, transparent);
   --elevation-glow-strong: 0 0 0 3px color-mix(in oklab, var(--ring) 26%, transparent),
-    0 0 12px color-mix(in oklab, var(--ring) 28%, transparent);
+    0 0 20px color-mix(in oklab, var(--ring) 30%, transparent);
 }
 
 /* 将语义变量暴露为 Tailwind 工具类 */
@@ -130,6 +236,8 @@
   --color-secondary-foreground: var(--secondary-foreground);
   --color-accent: var(--accent);
   --color-accent-foreground: var(--accent-foreground);
+  --color-accent2: var(--accent2);
+  --color-on-accent2: var(--on-accent2);
   --color-destructive: var(--destructive);
   --color-destructive-foreground: var(--destructive-foreground);
   --color-destructive-soft: var(--destructive-soft);
@@ -139,8 +247,9 @@
   --color-input: var(--input);
   --color-ring: var(--ring);
 
-  /* 阴影只给浮层 */
+  /* 阴影只给浮层与悬浮卡片 */
   --shadow-popover: var(--elevation-popover);
+  --shadow-raised: var(--elevation-raised);
   --shadow-glow: var(--elevation-glow);
   --shadow-glow-strong: var(--elevation-glow-strong);
 }
@@ -159,7 +268,9 @@
   }
 
   body {
-    @apply bg-background font-sans text-sm text-foreground antialiased;
+    /* 窗口透明（网页在 UI 层之下），背景由各区域组件自绘：
+       浏览态内容区保持全透明以透出网页，其余页面用 bg-surface 覆盖。 */
+    @apply font-sans text-sm text-foreground antialiased;
     font-synthesis: none;
     text-rendering: optimizeLegibility;
   }

@@ -1,5 +1,5 @@
 import { LoaderCircle } from "lucide-react";
-import { AnimatePresence, motion } from "motion/react";
+import { AnimatePresence, MotionConfig, motion } from "motion/react";
 import {
   type FormEvent,
   useCallback,
@@ -12,7 +12,7 @@ import { listen } from "@tauri-apps/api/event";
 
 import { api } from "./api";
 import type { AppSnapshot, ShellSection, TabRecord } from "./types";
-import { pageFade } from "./lib/motion";
+import { pageFade, revealContent, revealRoot } from "./lib/motion";
 import {
   getAddressSuggestions,
   type AddressSuggestion,
@@ -70,6 +70,9 @@ function App() {
   const [address, setAddress] = useState("");
   const [error, setError] = useState<string | null>(null);
   const [zoom, setZoom] = useState(1);
+  const [navOverlayOpen, setNavOverlayOpen] = useState(false);
+  const [tabStripOverlayOpen, setTabStripOverlayOpen] = useState(false);
+  const overlayOpen = navOverlayOpen || tabStripOverlayOpen;
   const addressRef = useRef<HTMLInputElement>(null);
   const lastActiveUrl = useRef<string | null>(null);
 
@@ -78,6 +81,15 @@ function App() {
       snapshot.data.tabs.find((tab) => tab.id === snapshot.data.activeTabId) ??
       null,
     [snapshot.data.activeTabId, snapshot.data.tabs],
+  );
+  const locked = snapshot.locked || snapshot.firstRun;
+  const browsing = useMemo(
+    () =>
+      !locked &&
+      section === "newtab" &&
+      activeTab != null &&
+      activeTab.url !== "quickpane://newtab",
+    [activeTab, locked, section],
   );
   const addressSuggestions = useMemo(
     () =>
@@ -131,6 +143,29 @@ function App() {
       }
     },
     [],
+  );
+
+  // main WebView 扩缩：浏览态收缩到 chrome（网页区域无遮挡、鼠标直达网页）；
+  // 浮层/非浏览页/锁屏扩回满幅。收缩延迟一拍，等浮层退场动画播完再缩窗。
+  useEffect(() => {
+    const expanded = locked || !browsing || overlayOpen;
+    if (!expanded) {
+      const timer = window.setTimeout(
+        () => void run(() => api.setShellExpanded(false)),
+        120,
+      );
+      return () => window.clearTimeout(timer);
+    }
+    void run(() => api.setShellExpanded(true));
+  }, [browsing, locked, overlayOpen, run]);
+
+  const runSnapshot = useCallback(
+    async (action: () => Promise<AppSnapshot>) => {
+      const next = await run(action);
+      if (next) applySnapshot(next);
+      return next;
+    },
+    [applySnapshot, run],
   );
 
   useEffect(() => {
@@ -191,27 +226,30 @@ function App() {
     );
   }, [activeTab?.id, activeTab?.url]);
 
-  const openMenu = useCallback(
-    (anchor: { x: number; y: number }) => {
-      void run(() => api.showMenuWindow(anchor.x, anchor.y));
-    },
-    [run],
-  );
-
   const openSection = useCallback(
     (next: ShellSection) => {
       setSection(next);
-      void run(async () => applySnapshot(await api.showShell(true)));
+      void runSnapshot(() => api.showShell(true));
     },
-    [applySnapshot, run],
+    [runSnapshot],
+  );
+
+  const openTabMenu = useCallback(
+    (tabId: string, event: React.MouseEvent) => {
+      event.preventDefault();
+      void run(() =>
+        api.showTabMenuWindow(tabId, event.clientX, event.clientY),
+      );
+    },
+    [run],
   );
 
   const selectTab = useCallback(
     (tab: TabRecord) => {
       setSection(tab.url === "quickpane://newtab" ? "newtab" : "newtab");
-      void run(async () => applySnapshot(await api.selectTab(tab.id)));
+      void runSnapshot(() => api.selectTab(tab.id));
     },
-    [applySnapshot, run],
+    [runSnapshot],
   );
 
   const cycleTab = useCallback(
@@ -233,15 +271,13 @@ function App() {
   const createTab = useCallback(
     (url?: string) => {
       setSection("newtab");
-      void run(async () =>
-        applySnapshot(
-          url && activeTab?.url === "quickpane://newtab"
-            ? await api.navigate(activeTab.id, url)
-            : await api.newTab(url, true),
-        ),
+      void runSnapshot(() =>
+        activeTab?.url === "quickpane://newtab" && url
+          ? api.navigate(activeTab.id, url)
+          : api.newTab(url, true),
       );
     },
-    [activeTab, applySnapshot, run],
+    [activeTab, runSnapshot],
   );
 
   const navigateActiveTab = useCallback(
@@ -249,11 +285,9 @@ function App() {
       if (!activeTab || !input.trim()) return;
       setAddress(input);
       setSection("newtab");
-      void run(async () =>
-        applySnapshot(await api.navigate(activeTab.id, input)),
-      );
+      void runSnapshot(() => api.navigate(activeTab.id, input));
     },
-    [activeTab, applySnapshot, run],
+    [activeTab, runSnapshot],
   );
 
   const selectSuggestion = useCallback(
@@ -280,15 +314,6 @@ function App() {
     [address, navigateActiveTab],
   );
 
-  const setAddressSuggestionsOpen = useCallback(
-    (open: boolean) => {
-      if (section !== "newtab" || activeTab?.url === "quickpane://newtab")
-        return;
-      void run(() => api.showShell(open));
-    },
-    [activeTab?.url, run, section],
-  );
-
   const handleShortcut = useCallback(
     (shortcut: string, event?: globalThis.KeyboardEvent) => {
       if (event?.defaultPrevented || snapshot.locked || snapshot.firstRun)
@@ -306,7 +331,7 @@ function App() {
         case "restore-tab":
           if (!snapshot.data.recentlyClosed.length) return;
           event?.preventDefault();
-          void run(async () => applySnapshot(await api.restoreClosedTab()));
+          void runSnapshot(() => api.restoreClosedTab());
           break;
         case "new-tab":
           event?.preventDefault();
@@ -320,9 +345,7 @@ function App() {
         case "close-tab":
           if (!activeTab) return;
           event?.preventDefault();
-          void run(async () =>
-            applySnapshot(await api.removeTab(activeTab.id)),
-          );
+          void runSnapshot(() => api.removeTab(activeTab.id));
           break;
         case "history":
         case "downloads":
@@ -332,10 +355,8 @@ function App() {
         case "bookmark":
           if (!activeTab?.url.startsWith("http")) return;
           event?.preventDefault();
-          void run(async () =>
-            applySnapshot(
-              await api.addBookmark(activeTab.title, activeTab.url),
-            ),
+          void runSnapshot(() =>
+            api.addBookmark(activeTab.title, activeTab.url),
           );
           break;
         case "find":
@@ -401,29 +422,29 @@ function App() {
     );
   }
 
-  const locked = snapshot.locked || snapshot.firstRun;
-  const browsing =
-    !locked && section === "newtab" && activeTab?.url !== "quickpane://newtab";
-
   return (
-    <TooltipProvider>
-      <main className="flex h-full flex-col bg-surface">
+    <MotionConfig reducedMotion="user">
+      <TooltipProvider>
+        <motion.main
+          initial={false}
+          variants={revealRoot}
+          animate={snapshot.windowVisible ? "visible" : "hidden"}
+          className={`flex h-full flex-col ${browsing ? "bg-transparent" : "bg-surface"}`}
+        >
         {locked ? null : (
           <>
             <TabStrip
               tabs={snapshot.data.tabs}
               activeId={snapshot.data.activeTabId}
               onSelect={selectTab}
-              onClose={(id) =>
-                void run(async () => applySnapshot(await api.removeTab(id)))
-              }
+              onContextMenu={openTabMenu}
+              onClose={(id) => void runSnapshot(() => api.removeTab(id))}
               recentlyClosed={snapshot.data.recentlyClosed}
               onRestoreClosed={(id) =>
-                void run(async () =>
-                  applySnapshot(await api.restoreClosedTab(id)),
-                )
+                void runSnapshot(() => api.restoreClosedTab(id))
               }
               onNew={() => createTab()}
+              onOverlayOpenChange={setTabStripOverlayOpen}
             />
             <NavigationBar
               activeTab={activeTab}
@@ -433,7 +454,7 @@ function App() {
               addressRef={addressRef}
               suggestions={addressSuggestions}
               onSuggestion={selectSuggestion}
-              onSuggestionsOpenChange={setAddressSuggestionsOpen}
+              onOverlayOpenChange={setNavOverlayOpen}
               windowVisible={snapshot.windowVisible}
               bookmarked={Boolean(
                 activeTab &&
@@ -443,10 +464,8 @@ function App() {
               )}
               onBookmark={() => {
                 if (!activeTab?.url.startsWith("http")) return;
-                void run(async () =>
-                  applySnapshot(
-                    await api.addBookmark(activeTab.title, activeTab.url),
-                  ),
+                void runSnapshot(() =>
+                  api.addBookmark(activeTab.title, activeTab.url),
                 );
               }}
               onBack={() => void run(api.back)}
@@ -465,12 +484,17 @@ function App() {
                   ),
                 );
               }}
-              onOpenMenu={openMenu}
+              hasPassword={snapshot.hasPassword}
+              onOpenSection={openSection}
+              onLockNow={() => void run(api.lockNow)}
             />
           </>
         )}
 
-        <section
+        <motion.section
+          initial={false}
+          variants={revealContent}
+          animate={snapshot.windowVisible ? "visible" : "hidden"}
           className={`min-h-0 flex-1 ${locked || browsing ? "overflow-hidden" : "overflow-y-auto"}`}
         >
           <AnimatePresence mode="wait" initial={false}>
@@ -503,19 +527,15 @@ function App() {
                   <NewTabPage
                     snapshot={snapshot}
                     onNavigate={(url) =>
-                      void run(async () =>
-                        applySnapshot(await api.navigate(activeTab.id, url)),
-                      )
+                      void runSnapshot(() => api.navigate(activeTab.id, url))
                     }
                     onSection={openSection}
                     onUpdateQuickLinks={(quickLinks) =>
-                      void run(async () =>
-                        applySnapshot(
-                          await api.updateSettings({
-                            ...snapshot.data.settings,
-                            quickLinks,
-                          }),
-                        ),
+                      void runSnapshot(() =>
+                        api.updateSettings({
+                          ...snapshot.data.settings,
+                          quickLinks,
+                        }),
                       )
                     }
                   />
@@ -523,31 +543,21 @@ function App() {
                   <HistoryPage
                     snapshot={snapshot}
                     onOpen={createTab}
-                    onClear={() =>
-                      void run(async () =>
-                        applySnapshot(await api.clearHistory()),
-                      )
-                    }
+                    onClear={() => void runSnapshot(() => api.clearHistory())}
                   />
                 ) : section === "bookmarks" ? (
                   <BookmarksPage
                     snapshot={snapshot}
                     onOpen={createTab}
                     onRemove={(id) =>
-                      void run(async () =>
-                        applySnapshot(await api.removeBookmark(id)),
-                      )
+                      void runSnapshot(() => api.removeBookmark(id))
                     }
                   />
                 ) : section === "downloads" ? (
                   <DownloadsPage
                     snapshot={snapshot}
                     onOpen={(path) => void run(() => api.openDownload(path))}
-                    onClear={() =>
-                      void run(async () =>
-                        applySnapshot(await api.clearDownloads()),
-                      )
-                    }
+                    onClear={() => void runSnapshot(() => api.clearDownloads())}
                   />
                 ) : section === "extensions" ? (
                   <ExtensionsPage
@@ -568,11 +578,12 @@ function App() {
               </motion.div>
             )}
           </AnimatePresence>
-        </section>
+        </motion.section>
 
         <ErrorBanner error={error} onDismiss={() => setError(null)} />
-      </main>
-    </TooltipProvider>
+        </motion.main>
+      </TooltipProvider>
+    </MotionConfig>
   );
 }
 

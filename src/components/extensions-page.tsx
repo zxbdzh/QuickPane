@@ -75,8 +75,8 @@ function ExtensionsPage({ run, onOpen, pinnedIds, applySnapshot }: {
         </div>
       ) : extensions.length === 0 ? (
         <div className="grid place-items-center gap-3 rounded-lg border border-dashed border-border py-20 text-center">
-          <div className="grid size-12 place-items-center rounded-full bg-muted">
-            <Puzzle className="size-5 text-muted-foreground" />
+          <div className="grid size-12 place-items-center rounded-full bg-soft">
+            <Puzzle className="size-5 text-on-soft" />
           </div>
           <div>
             <p className="text-sm font-medium">尚未安装扩展</p>

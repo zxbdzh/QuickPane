@@ -57,8 +57,15 @@ function NewTabPage({
   };
 
   return (
-    <div className="mx-auto w-full max-w-[760px] px-6 pt-[clamp(48px,10vh,104px)] pb-16">
-      <header className="mb-7 flex items-center justify-center gap-3.5">
+    <div className="relative mx-auto w-full max-w-[760px] px-6 pt-[clamp(48px,10vh,104px)] pb-16">
+      <div
+        aria-hidden
+        className="pointer-events-none absolute inset-0"
+      >
+        <div className="absolute -top-28 left-[-18vw] size-[34rem] animate-aurora-a rounded-full bg-primary/8 blur-3xl" />
+        <div className="absolute -right-[18vw] -bottom-36 size-[30rem] animate-aurora-b rounded-full bg-accent2/8 blur-3xl" />
+      </div>
+      <header className="relative mb-7 flex items-center justify-center gap-3.5">
         <img
           src="/quickpane-mark.svg"
           alt=""
@@ -66,7 +73,7 @@ function NewTabPage({
           className="size-11 shrink-0"
         />
         <div>
-          <h1 className="text-xl font-semibold leading-tight">QuickPane</h1>
+          <h1 className="font-mono text-xl font-semibold leading-tight tracking-tight">QuickPane</h1>
           <p className="text-xs text-muted-foreground">你的轻量浏览空间</p>
         </div>
       </header>
@@ -91,7 +98,7 @@ function NewTabPage({
         <Kbd>Enter</Kbd>
       </form>
 
-      <div className="mt-7 grid grid-cols-2 gap-2 sm:grid-cols-4">
+      <div className="relative mt-7 grid grid-cols-2 gap-2 sm:grid-cols-4">
         {snapshot.data.settings.quickLinks.map((link, index) =>
           editingId === link.id ? (
             <motion.form
@@ -214,14 +221,14 @@ function NewTabPage({
         </motion.button>
       </div>
 
-      <div className="mt-6 grid grid-cols-3 border-t border-border">
+      <div className="relative mt-6 grid grid-cols-3 border-t border-border">
         <button
           onClick={() => onSection("history")}
           className="flex h-11 cursor-default items-center justify-center gap-2 text-xs text-muted-foreground outline-none transition-colors hover:text-foreground focus-visible:ring-[3px] focus-visible:ring-ring/50"
         >
           <Clock3 className="size-3.5" />
           最近访问
-          <span className="text-faint">{snapshot.data.history.length}</span>
+          <span className="font-mono text-faint">{snapshot.data.history.length}</span>
         </button>
         <button
           onClick={() => onSection("bookmarks")}
@@ -237,7 +244,7 @@ function NewTabPage({
         >
           <FileDown className="size-3.5" />
           下载记录
-          <span className="text-faint">{snapshot.data.downloads.length}</span>
+          <span className="font-mono text-faint">{snapshot.data.downloads.length}</span>
         </button>
       </div>
     </div>

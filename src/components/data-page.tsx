@@ -57,7 +57,7 @@ function PageShell({
                 <div>
                     <h1 className="text-xl font-semibold">{title}</h1>
                     <p className="mt-0.5 text-xs text-muted-foreground">
-                        {count} 项
+                        <span className="font-mono">{count}</span> 项
                     </p>
                 </div>
                 {onClear && count > 0 ? (
@@ -115,7 +115,7 @@ function EmptyState({
 }) {
     return (
         <div className="flex flex-col items-center justify-center gap-3 rounded-lg border border-dashed py-20 text-center">
-            <span className="grid size-12 place-items-center rounded-md bg-muted text-muted-foreground [&_svg]:size-5">
+            <span className="grid size-12 place-items-center rounded-md bg-soft text-on-soft [&_svg]:size-5">
                 {icon}
             </span>
             <div>
@@ -178,7 +178,7 @@ function DataRow({
                     {subtitle}
                 </p>
             </div>
-            <time className="text-xs text-muted-foreground">{meta}</time>
+            <time className="font-mono text-xs text-muted-foreground">{meta}</time>
             <div className="flex items-center gap-0.5">
                 {onRemove ? (
                     <Button

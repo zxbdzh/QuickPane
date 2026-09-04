@@ -1,9 +1,7 @@
 import * as TooltipPrimitive from "@radix-ui/react-tooltip";
 import type { ComponentProps } from "react";
-import { motion } from "motion/react";
 
 import { cn } from "../../lib/utils";
-import { overlayIn } from "../../lib/motion";
 
 function TooltipProvider({
   delayDuration = 400,
@@ -29,17 +27,15 @@ function TooltipContent({
   return (
     <TooltipPrimitive.Portal>
       <TooltipPrimitive.Content asChild sideOffset={sideOffset} {...props}>
-        <motion.div
-          initial="initial"
-          animate="animate"
-          variants={overlayIn}
+        <div
           className={cn(
             "z-50 w-fit rounded-sm bg-foreground px-2 py-1 text-xs text-background shadow-popover",
+            "data-[state=delayed-open]:animate-tooltip-in data-[state=instant-open]:animate-tooltip-in data-[state=closed]:animate-overlay-fade",
             className,
           )}
         >
           {children}
-        </motion.div>
+        </div>
       </TooltipPrimitive.Content>
     </TooltipPrimitive.Portal>
   );

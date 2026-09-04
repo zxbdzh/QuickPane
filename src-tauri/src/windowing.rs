@@ -6,7 +6,7 @@ use tauri::{
 use tauri_plugin_global_shortcut::{GlobalShortcutExt, ShortcutState};
 
 use crate::{
-    browser::{emit_snapshot, hide_all_tabs, set_all_muted, show_active_tab},
+    browser::{emit_snapshot, hide_all_tabs, set_all_muted, set_shell_mode, show_active_tab},
     state::AppState,
 };
 
@@ -28,12 +28,9 @@ pub fn install_tray(app: &AppHandle) -> Result<(), String> {
         .on_menu_event(|app, event| match event.id.as_ref() {
             "toggle" => toggle_window(app),
             "settings" => {
+                let _ = set_shell_mode(app, true);
                 show_window(app);
-                let state = app.state::<AppState>();
-                let _ = state.mutate_runtime(|runtime| runtime.shell_mode = true);
-                hide_all_tabs(app);
                 let _ = app.emit("open-section", "settings");
-                emit_snapshot(app);
             }
             "quit" => quit_app(app),
             _ => {}
@@ -118,6 +115,7 @@ pub fn hide_window(app: &AppHandle) {
         current
     };
     set_all_muted(app, true);
+    hide_all_tabs(app);
     let _ = window.set_fullscreen(false);
     let _ = window.hide();
     // 菜单弹层窗口跟随主窗口一起收起，避免悬浮残留。
@@ -231,11 +229,10 @@ pub fn lock_app(app: &AppHandle) {
                 runtime.shell_mode = true;
                 runtime.hidden_since = None;
             });
+            // 锁屏 UI 在 main WebView 里，必须先扩回满幅再显示。
+            let _ = crate::browser::set_shell_expanded(app, true);
             hide_all_tabs(app);
             set_all_muted(app, true);
-            if let Some(menu) = app.get_webview_window("menu") {
-                let _ = menu.hide();
-            }
             if let Some(popup) = app.get_webview_window("extension-popup") {
                 let _ = popup.hide();
             }

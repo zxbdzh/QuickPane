@@ -1,10 +1,8 @@
 import * as SelectPrimitive from "@radix-ui/react-select";
 import { Check, ChevronDown, ChevronUp } from "lucide-react";
 import type { ComponentProps } from "react";
-import { motion } from "motion/react";
 
 import { cn } from "../../lib/utils";
-import { overlayIn } from "../../lib/motion";
 
 function Select({ ...props }: ComponentProps<typeof SelectPrimitive.Root>) {
   return <SelectPrimitive.Root {...props} />;
@@ -49,12 +47,10 @@ function SelectContent({
   return (
     <SelectPrimitive.Portal>
       <SelectPrimitive.Content asChild position={position} {...props}>
-        <motion.div
-          initial="initial"
-          animate="animate"
-          variants={overlayIn}
+        <div
           className={cn(
             "relative z-50 max-h-[min(360px,var(--radix-select-content-available-height))] min-w-[128px] overflow-hidden rounded-md border bg-popover text-popover-foreground shadow-popover",
+            "data-[state=open]:animate-overlay-pop data-[state=closed]:animate-overlay-fade",
             position === "popper" &&
               "data-[side=bottom]:translate-y-1 data-[side=top]:-translate-y-1",
             className,
@@ -75,7 +71,7 @@ function SelectContent({
           <SelectPrimitive.ScrollDownButton className="flex h-6 items-center justify-center text-muted-foreground">
             <ChevronDown className="size-3.5" />
           </SelectPrimitive.ScrollDownButton>
-        </motion.div>
+        </div>
       </SelectPrimitive.Content>
     </SelectPrimitive.Portal>
   );
@@ -99,7 +95,7 @@ function SelectItem({
       <SelectPrimitive.ItemText>{children}</SelectPrimitive.ItemText>
       <span className="absolute right-2 flex size-3.5 items-center justify-center">
         <SelectPrimitive.ItemIndicator>
-          <Check className="size-3.5 text-primary" />
+          <Check className="size-3.5 text-accent2" />
         </SelectPrimitive.ItemIndicator>
       </span>
     </SelectPrimitive.Item>
@@ -108,10 +104,7 @@ function SelectItem({
 
 function SelectLabel({ className, ...props }: ComponentProps<typeof SelectPrimitive.Label>) {
   return (
-    <SelectPrimitive.Label
-      className={cn("px-2 py-1.5 text-xs text-muted-foreground", className)}
-      {...props}
-    />
+    <SelectPrimitive.Label className={cn("px-2 py-1.5 text-xs text-muted-foreground", className)} {...props} />
   );
 }
 

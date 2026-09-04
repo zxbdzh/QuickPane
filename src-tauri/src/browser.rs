@@ -10,7 +10,8 @@ use url::Url;
 use uuid::Uuid;
 
 use crate::state::{
-    display_title_from_url, AppSnapshot, AppState, DownloadRecord, HistoryEntry, TabRecord,
+    display_title_from_url, AppSnapshot, AppState, DownloadRecord, HistoryEntry, RuntimeData,
+    TabRecord,
 };
 
 #[cfg(windows)]
@@ -29,9 +30,9 @@ use windows::Win32::UI::Input::KeyboardAndMouse::{
 
 pub const CHROME_HEIGHT: f64 = 86.0;
 
-/// WebView2 的默认附加参数（与 Tauri 默认值保持一致），注入代理时必须一并带上。
-const WEBVIEW2_DEFAULT_ARGS: &str =
-    "--disable-features=msWebOOUI,msPdfOOUI,msSmartScreenProtection";
+/// 代理设置 → WebView2 附加浏览器参数；system 模式返回 None（使用默认行为）。
+/// 代理分支会覆盖 Wry 默认参数，因此只补回 UI/PDF 兼容项，不关闭 SmartScreen。
+const WEBVIEW2_DEFAULT_ARGS: &str = "--disable-features=msWebOOUI,msPdfOOUI";
 
 const MUTE_TAB_SCRIPT: &str = r#"
 window.__qpMuteObserver?.disconnect();
@@ -336,6 +337,8 @@ pub fn ensure_tab_webview(app: &AppHandle, tab_id: &str) -> Result<(), String> {
     let webview = window
         .add_child(builder, position, size)
         .map_err(|error| error.to_string())?;
+    // 创建即下沉：保证新标签 WebView 永远位于 UI 层（main WebView）之下。
+    sink_tab_below_shell(app);
     install_tab_shortcuts(app, &webview)?;
     if !is_active {
         webview.hide().map_err(|error| error.to_string())?;
@@ -394,26 +397,13 @@ pub fn create_tab(
         hide_all_tabs(app);
         if url != "quickpane://newtab" {
             if let Err(error) = ensure_tab_webview(app, &id) {
-                if let Some(webview) = app.get_webview(&tab_label(&id)) {
-                    let _ = webview.close();
-                }
-                let _ = state.mutate_runtime(|runtime| {
-                    runtime.data.tabs.retain(|tab| tab.id != id);
-                    if runtime.data.active_tab_id.as_deref() == Some(&id) {
-                        runtime.data.active_tab_id = previous_active_id.clone();
-                        runtime.shell_mode = previous_shell_mode;
-                    }
-                    sort_tabs(&mut runtime.data.tabs);
-                });
-                let _ = state.save();
-                hide_all_tabs(app);
-                if !previous_shell_mode {
-                    if let Some(previous_id) = previous_active_id.as_deref() {
-                        let _ = ensure_tab_webview(app, previous_id);
-                    }
-                }
-                show_active_tab(app);
-                emit_snapshot(app);
+                rollback_opened_tab_transition(
+                    app,
+                    &id,
+                    previous_active_id.clone(),
+                    previous_shell_mode,
+                    None,
+                );
                 return Err(error);
             }
         }
@@ -505,35 +495,13 @@ pub async fn restore_closed_tab(
     hide_all_tabs(app);
     if url != "quickpane://newtab" {
         if let Err(error) = ensure_tab_webview(app, &id) {
-            if let Some(webview) = app.get_webview(&tab_label(&id)) {
-                let _ = webview.close();
-            }
-            let _ = state.mutate_runtime(|runtime| {
-                runtime.data.tabs.retain(|tab| tab.id != id);
-                if !runtime
-                    .data
-                    .recently_closed
-                    .iter()
-                    .any(|tab| tab.id == closed.id)
-                {
-                    runtime.data.recently_closed.insert(0, closed.clone());
-                    runtime.data.recently_closed.truncate(20);
-                }
-                if runtime.data.active_tab_id.as_deref() == Some(&id) {
-                    runtime.data.active_tab_id = previous_active_id.clone();
-                    runtime.shell_mode = previous_shell_mode;
-                }
-                sort_tabs(&mut runtime.data.tabs);
-            });
-            let _ = state.save();
-            hide_all_tabs(app);
-            if !previous_shell_mode {
-                if let Some(previous_id) = previous_active_id.as_deref() {
-                    let _ = ensure_tab_webview(app, previous_id);
-                }
-            }
-            show_active_tab(app);
-            emit_snapshot(app);
+            rollback_opened_tab_transition(
+                app,
+                &id,
+                previous_active_id.clone(),
+                previous_shell_mode,
+                Some(&closed),
+            );
             return Err(error);
         }
     }
@@ -559,14 +527,17 @@ pub async fn activate_tab(app: &AppHandle, tab_id: &str) -> Result<AppSnapshot, 
         )
     };
     let is_new_tab = previous_tab.url == "quickpane://newtab";
+    let transition_origin = TabTransitionOrigin {
+        previous_active_id,
+        previous_shell_mode,
+        webview_was_present,
+    };
     let rollback = || {
         rollback_tab_transition(
             app,
             tab_id,
             &previous_tab,
-            previous_active_id.clone(),
-            previous_shell_mode,
-            webview_was_present,
+            &transition_origin,
             &previous_tab.url,
             false,
         );
@@ -632,14 +603,17 @@ pub async fn navigate_tab(
             app.get_webview(&tab_label(tab_id)).is_some(),
         )
     };
+    let transition_origin = TabTransitionOrigin {
+        previous_active_id,
+        previous_shell_mode,
+        webview_was_present,
+    };
     let rollback = || {
         rollback_tab_transition(
             app,
             tab_id,
             &previous_tab,
-            previous_active_id.clone(),
-            previous_shell_mode,
-            webview_was_present,
+            &transition_origin,
             &target,
             true,
         );
@@ -834,44 +808,181 @@ pub fn hide_all_tabs(app: &AppHandle) {
     }
 }
 
+/// 把标签层 WebView 压到主 WebView（React UI 层）之下。
+/// Win32 同级子窗口按创建顺序叠放，后创建的 tab WebView 默认盖在 UI 上；
+/// tauri::Webview 未暴露 HWND，这里枚举主窗口直接子窗口，
+/// bounds 未覆盖完整客户区的（tab 层，高度少 CHROME_HEIGHT）全部压到 z 序最底，
+/// 满幅的 main UI WebView 天然在其上——地址下拉、菜单等浮层原生覆盖网页。
+#[cfg(windows)]
+fn sink_tab_below_shell(app: &AppHandle) {
+    use windows::Win32::Foundation::{HWND, LPARAM, RECT};
+    use windows::Win32::UI::WindowsAndMessaging::{EnumChildWindows, GetClientRect};
+
+    struct SinkCtx {
+        parent: HWND,
+        client: RECT,
+    }
+
+    unsafe extern "system" fn sink_enum_proc(hwnd: HWND, lparam: LPARAM) -> windows::core::BOOL {
+        use windows::core::BOOL;
+        use windows::Win32::Foundation::{POINT, RECT};
+        use windows::Win32::Graphics::Gdi::MapWindowPoints;
+        use windows::Win32::UI::WindowsAndMessaging::{
+            GetWindowRect, HWND_BOTTOM, SetWindowPos, SWP_NOACTIVATE, SWP_NOMOVE, SWP_NOSIZE,
+        };
+
+        let ctx = &*(lparam.0 as *const SinkCtx);
+        let mut rect = RECT::default();
+        if unsafe { GetWindowRect(hwnd, &mut rect) }.is_err() {
+            return BOOL(1);
+        }
+        let mut corners = [
+            POINT { x: rect.left, y: rect.top },
+            POINT { x: rect.right, y: rect.bottom },
+        ];
+        unsafe { MapWindowPoints(None, Some(ctx.parent), &mut corners) };
+        let covers_client =
+            corners[0].x <= 0 && corners[0].y <= 0 && corners[1].x >= ctx.client.right
+                && corners[1].y >= ctx.client.bottom;
+        if !covers_client {
+            unsafe {
+                let _ = SetWindowPos(
+                    hwnd,
+                    Some(HWND_BOTTOM),
+                    0,
+                    0,
+                    0,
+                    0,
+                    SWP_NOMOVE | SWP_NOSIZE | SWP_NOACTIVATE,
+                );
+            }
+        }
+        BOOL(1)
+    }
+
+    let Some(window) = app.get_window("main") else {
+        return;
+    };
+    let Ok(hwnd) = window.hwnd() else {
+        return;
+    };
+    let native = HWND(hwnd.0 as *mut _);
+    let mut client = RECT::default();
+    if unsafe { GetClientRect(native, &mut client) }.is_err() {
+        return;
+    }
+    let ctx = SinkCtx {
+        parent: native,
+        client,
+    };
+    unsafe {
+        let _ = EnumChildWindows(
+            Some(native),
+            Some(sink_enum_proc),
+            LPARAM(&ctx as *const SinkCtx as isize),
+        );
+    }
+}
+
+#[cfg(not(windows))]
+fn sink_tab_below_shell(_app: &AppHandle) {}
+
 pub fn resize_tabs(app: &AppHandle) {
     let Ok((position, size)) = browser_bounds(app) else {
         return;
     };
+    let collapsed = app
+        .state::<AppState>()
+        .inner
+        .lock()
+        .map(|runtime| runtime.shell_collapsed)
+        .unwrap_or(false);
     for webview in app.webviews().values() {
         if webview.label().starts_with("tab-") {
             let _ = webview.set_position(position);
             let _ = webview.set_size(size);
         }
     }
+    if let Some(shell) = app.get_webview("main") {
+        // 窗口尺寸变化时，main WebView 按当前模式（收缩=仅 chrome / 满幅）同步宽度。
+        let shell_size = if collapsed {
+            LogicalSize::new(size.width, CHROME_HEIGHT)
+        } else {
+            LogicalSize::new(size.width, size.height + CHROME_HEIGHT)
+        };
+        let _ = shell.set_position(LogicalPosition::new(0.0, 0.0));
+        let _ = shell.set_size(shell_size);
+    }
+}
+
+/// 浏览态把 main WebView 收缩到顶部 chrome（网页区域无遮挡、鼠标直达网页）；
+/// 浮层/页面/锁屏需要覆盖内容区时扩回满幅（UI 层在 z 序上方，浮层照常盖住网页）。
+pub fn set_shell_expanded(app: &AppHandle, expanded: bool) -> Result<(), String> {
+    let collapsed = !expanded;
+    let changed = app
+        .state::<AppState>()
+        .inner
+        .lock()
+        .map(|runtime| runtime.shell_collapsed != collapsed)
+        .unwrap_or(true);
+    if !changed {
+        return Ok(());
+    }
+    app.state::<AppState>()
+        .mutate_runtime(|runtime| runtime.shell_collapsed = collapsed)?;
+    let Some(window) = app.get_window("main") else {
+        return Ok(());
+    };
+    let size = window.inner_size().map_err(|error| error.to_string())?;
+    let scale = window.scale_factor().map_err(|error| error.to_string())?;
+    let logical = size.to_logical::<f64>(scale);
+    let Some(shell) = app.get_webview("main") else {
+        return Ok(());
+    };
+    let target = if collapsed {
+        LogicalSize::new(logical.width.max(1.0), CHROME_HEIGHT)
+    } else {
+        LogicalSize::new(logical.width.max(1.0), logical.height.max(1.0))
+    };
+    shell
+        .set_position(LogicalPosition::new(0.0, 0.0))
+        .map_err(|error| error.to_string())?;
+    shell
+        .set_size(target)
+        .map_err(|error| error.to_string())?;
+    Ok(())
 }
 
 pub fn show_active_tab(app: &AppHandle) {
     let state = app.state::<AppState>();
     let active = state.inner.lock().ok().and_then(|runtime| {
-        if runtime.locked || runtime.shell_mode {
-            None
-        } else {
+        if tab_content_should_be_visible(&runtime) {
             runtime.data.active_tab_id.clone()
+        } else {
+            None
         }
     });
     hide_all_tabs(app);
     if let Some(id) = active {
         if let Some(webview) = app.get_webview(&tab_label(&id)) {
+            // 防御性再下沉一次：任何路径把 z 序抬起来都能在这里纠正。
+            sink_tab_below_shell(app);
             let _ = webview.show();
             let _ = webview.set_focus();
         }
     }
 }
 
+fn tab_content_should_be_visible(runtime: &RuntimeData) -> bool {
+    // 网页常驻 UI 层之下（UI 透明区域透出网页），shell 页面不再隐藏网页；
+    // 仅窗口隐藏（恢复前台窗口）和锁屏（隐私）时收起。
+    runtime.window_visible && !runtime.locked
+}
+
 pub fn set_shell_mode(app: &AppHandle, enabled: bool) -> Result<AppSnapshot, String> {
     let state = app.state::<AppState>();
     state.mutate_runtime(|runtime| runtime.shell_mode = enabled)?;
-    if enabled {
-        hide_all_tabs(app);
-    } else {
-        show_active_tab(app);
-    }
+    show_active_tab(app);
     emit_snapshot(app);
     Ok(state.snapshot())
 }
@@ -998,13 +1109,84 @@ fn sort_tabs(tabs: &mut [TabRecord]) {
     tabs.sort_by_key(|tab| !tab.pinned);
 }
 
+fn rollback_opened_tab_transition(
+    app: &AppHandle,
+    tab_id: &str,
+    previous_active_id: Option<String>,
+    previous_shell_mode: bool,
+    recently_closed: Option<&TabRecord>,
+) {
+    let state = app.state::<AppState>();
+    let rolled_back = state
+        .mutate_runtime(|runtime| {
+            rollback_opened_tab_data(
+                runtime,
+                tab_id,
+                &previous_active_id,
+                previous_shell_mode,
+                recently_closed,
+            )
+        })
+        .unwrap_or(false);
+    if !rolled_back {
+        emit_snapshot(app);
+        return;
+    }
+    let _ = state.save();
+
+    if let Some(webview) = app.get_webview(&tab_label(tab_id)) {
+        let _ = webview.close();
+    }
+    hide_all_tabs(app);
+    if !previous_shell_mode {
+        if let Some(previous_id) = previous_active_id.as_deref() {
+            let _ = ensure_tab_webview(app, previous_id);
+        }
+    }
+    show_active_tab(app);
+    emit_snapshot(app);
+}
+
+fn rollback_opened_tab_data(
+    runtime: &mut RuntimeData,
+    tab_id: &str,
+    previous_active_id: &Option<String>,
+    previous_shell_mode: bool,
+    recently_closed: Option<&TabRecord>,
+) -> bool {
+    // 后续切换已接管焦点时，不撤销它的状态。
+    if runtime.data.active_tab_id.as_deref() != Some(tab_id) {
+        return false;
+    }
+    runtime.data.tabs.retain(|tab| tab.id != tab_id);
+    if let Some(closed) = recently_closed {
+        if !runtime
+            .data
+            .recently_closed
+            .iter()
+            .any(|tab| tab.id == closed.id)
+        {
+            runtime.data.recently_closed.insert(0, closed.clone());
+            runtime.data.recently_closed.truncate(20);
+        }
+    }
+    runtime.data.active_tab_id = previous_active_id.clone();
+    runtime.shell_mode = previous_shell_mode;
+    sort_tabs(&mut runtime.data.tabs);
+    true
+}
+
+struct TabTransitionOrigin {
+    previous_active_id: Option<String>,
+    previous_shell_mode: bool,
+    webview_was_present: bool,
+}
+
 fn rollback_tab_transition(
     app: &AppHandle,
     tab_id: &str,
     previous_tab: &TabRecord,
-    previous_active_id: Option<String>,
-    previous_shell_mode: bool,
-    webview_was_present: bool,
+    origin: &TabTransitionOrigin,
     expected_url: &str,
     restore_navigation: bool,
 ) {
@@ -1025,8 +1207,8 @@ fn rollback_tab_transition(
             } else {
                 tab.last_active_at = previous_tab.last_active_at;
             }
-            runtime.data.active_tab_id = previous_active_id.clone();
-            runtime.shell_mode = previous_shell_mode;
+            runtime.data.active_tab_id = origin.previous_active_id.clone();
+            runtime.shell_mode = origin.previous_shell_mode;
             sort_tabs(&mut runtime.data.tabs);
             true
         })
@@ -1038,7 +1220,7 @@ fn rollback_tab_transition(
     let _ = state.save();
 
     if let Some(webview) = app.get_webview(&tab_label(tab_id)) {
-        if webview_was_present {
+        if origin.webview_was_present {
             if restore_navigation {
                 if let Ok(url) = Url::parse(&previous_tab.url) {
                     let _ = webview.navigate(url);
@@ -1049,8 +1231,8 @@ fn rollback_tab_transition(
         }
     }
     hide_all_tabs(app);
-    if !previous_shell_mode {
-        if let Some(previous_id) = previous_active_id.as_deref() {
+    if !origin.previous_shell_mode {
+        if let Some(previous_id) = origin.previous_active_id.as_deref() {
             let _ = ensure_tab_webview(app, previous_id);
         }
     }
@@ -1113,6 +1295,115 @@ fn rollback_close_transition(
     }
     show_active_tab(app);
     emit_snapshot(app);
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::state::PersistedData;
+
+    fn runtime_with(
+        tabs: Vec<TabRecord>,
+        active_tab_id: Option<String>,
+        recently_closed: Vec<TabRecord>,
+        shell_mode: bool,
+    ) -> RuntimeData {
+        RuntimeData {
+            data: PersistedData {
+                tabs,
+                active_tab_id,
+                recently_closed,
+                ..PersistedData::default()
+            },
+            locked: false,
+            first_run: false,
+            window_visible: true,
+            quitting: false,
+            shell_mode,
+            shell_collapsed: false,
+            previous_window: 0,
+            hidden_since: None,
+        }
+    }
+
+    #[test]
+    fn proxy_args_keep_smart_screen_enabled() {
+        assert_eq!(
+            proxy_browser_args("direct", ""),
+            Some("--disable-features=msWebOOUI,msPdfOOUI --no-proxy-server".into())
+        );
+        assert_eq!(
+            proxy_browser_args("custom", " http://127.0.0.1:8080 "),
+            Some(
+                "--disable-features=msWebOOUI,msPdfOOUI --proxy-server=http://127.0.0.1:8080"
+                    .into(),
+            )
+        );
+    }
+    #[test]
+    fn tab_content_visibility_requires_window_and_unlock() {
+        let runtime = runtime_with(Vec::new(), None, Vec::new(), false);
+        assert!(tab_content_should_be_visible(&runtime));
+
+        let mut hidden = runtime.clone();
+        hidden.window_visible = false;
+        assert!(!tab_content_should_be_visible(&hidden));
+
+        let mut locked = runtime;
+        locked.locked = true;
+        assert!(!tab_content_should_be_visible(&locked));
+    }
+
+    #[test]
+    fn rollback_opened_tab_removes_a_failed_new_tab() {
+        let previous = TabRecord::new("https://before.example".into(), "Before".into(), false);
+        let opened = TabRecord::new("https://opened.example".into(), "Opened".into(), false);
+        let mut runtime = runtime_with(
+            vec![previous.clone(), opened.clone()],
+            Some(opened.id.clone()),
+            Vec::new(),
+            false,
+        );
+
+        assert!(rollback_opened_tab_data(
+            &mut runtime,
+            &opened.id,
+            &Some(previous.id.clone()),
+            false,
+            None,
+        ));
+        assert_eq!(runtime.data.tabs.len(), 1);
+        assert_eq!(runtime.data.tabs[0].id, previous.id);
+        assert_eq!(runtime.data.active_tab_id, Some(previous.id));
+        assert!(!runtime.shell_mode);
+    }
+
+    #[test]
+    fn rollback_opened_tab_returns_a_failed_restore_to_recently_closed() {
+        let previous = TabRecord::new("quickpane://newtab".into(), "新标签页".into(), false);
+        let closed = TabRecord::new("https://restore.example".into(), "Restore".into(), false);
+        let mut restored = closed.clone();
+        restored.muted = false;
+        let mut runtime = runtime_with(
+            vec![previous.clone(), restored.clone()],
+            Some(restored.id.clone()),
+            Vec::new(),
+            false,
+        );
+
+        assert!(rollback_opened_tab_data(
+            &mut runtime,
+            &restored.id,
+            &Some(previous.id.clone()),
+            true,
+            Some(&closed),
+        ));
+        assert_eq!(runtime.data.tabs.len(), 1);
+        assert_eq!(runtime.data.active_tab_id, Some(previous.id));
+        assert!(runtime.shell_mode);
+        assert_eq!(runtime.data.recently_closed.len(), 1);
+        assert_eq!(runtime.data.recently_closed[0].id, closed.id);
+    }
 }
 
 fn handle_download(app: &AppHandle, event: DownloadEvent<'_>) -> bool {

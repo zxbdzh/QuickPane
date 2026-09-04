@@ -341,7 +341,7 @@ function SettingsPage({ snapshot, applySnapshot, run }: {
                 <span>{updateProgress.total ? `${Math.round((updateProgress.downloaded / updateProgress.total) * 100)}%` : "下载中"}</span>
               </div>
               <div
-                className="h-1.5 overflow-hidden rounded-full bg-muted"
+                className="relative h-1.5 overflow-hidden rounded-full bg-muted"
                 role="progressbar"
                 aria-label="更新下载进度"
                 aria-valuemin={0}
@@ -349,7 +349,9 @@ function SettingsPage({ snapshot, applySnapshot, run }: {
                 aria-valuenow={updateProgress.total ? updateProgress.downloaded : undefined}
                 aria-valuetext={updateProgress.total ? `${Math.round((updateProgress.downloaded / updateProgress.total) * 100)}%` : "下载中"}
               >
-                <div className="h-full bg-primary transition-[width]" style={{ width: updateProgress.total ? `${Math.min(100, (updateProgress.downloaded / updateProgress.total) * 100)}%` : "35%" }} />
+                <div className="relative h-full overflow-hidden rounded-full bg-gradient-to-r from-primary to-accent2 transition-[width]" style={{ width: updateProgress.total ? `${Math.min(100, (updateProgress.downloaded / updateProgress.total) * 100)}%` : "35%" }}>
+                  <span aria-hidden className="absolute inset-0 animate-shimmer bg-gradient-to-r from-transparent via-white/25 to-transparent dark:via-white/15" />
+                </div>
               </div>
             </div>
           ) : null}

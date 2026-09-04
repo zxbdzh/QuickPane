@@ -137,6 +137,12 @@ fn show_shell(app: AppHandle, visible: bool) -> Result<AppSnapshot, String> {
 }
 
 #[tauri::command]
+fn set_shell_expanded(app: AppHandle, expanded: bool) -> Result<(), String> {
+    require_unlocked(&app)?;
+    browser::set_shell_expanded(&app, expanded)
+}
+
+#[tauri::command]
 fn hide_to_tray(app: AppHandle) -> Result<(), String> {
     require_unlocked(&app)?;
     hide_window(&app);
@@ -336,48 +342,6 @@ async fn update_settings(
 fn list_extensions(app: AppHandle) -> Result<Vec<extensions::ExtInfo>, String> {
     require_unlocked(&app)?;
     Ok(extensions::list(&app))
-}
-
-/// 菜单用独立置顶子窗口承载：主 WebView 里的 HTML 浮层会被标签 WebView 盖住。
-/// x/y 是按钮锚点相对主窗口客户区的逻辑坐标。
-/// 必须是 async 命令：同步命令在主线程执行，在其间创建 WebView 窗口页面会加载失败
-/// （create_tab 等异步命令创建的 WebView 均正常，见 docs/extensions.md 同类经验）。
-#[tauri::command]
-async fn show_menu_window(app: AppHandle, x: f64, y: f64) -> Result<(), String> {
-    require_unlocked(&app)?;
-    let main = app
-        .get_window("main")
-        .ok_or_else(|| "主窗口不存在".to_string())?;
-    let scale = main.scale_factor().map_err(|error| error.to_string())?;
-    let origin = main
-        .inner_position()
-        .map_err(|error| error.to_string())?
-        .to_logical::<f64>(scale);
-    let position = LogicalPosition::new(origin.x + x, origin.y + y);
-
-    if let Some(menu) = app.get_webview_window("menu") {
-        let _ = menu.set_position(position);
-        let _ = menu.show();
-        let _ = menu.set_focus();
-        return Ok(());
-    }
-    let menu =
-        tauri::WebviewWindowBuilder::new(&app, "menu", tauri::WebviewUrl::App("index.html".into()))
-            .title("QuickPane 菜单")
-            .inner_size(250.0, 300.0)
-            .position(position.x, position.y)
-            .decorations(false)
-            .transparent(true)
-            .always_on_top(true)
-            .skip_taskbar(true)
-            .resizable(false)
-            .shadow(false)
-            .focused(true)
-            .build()
-            .map_err(|error| error.to_string())?;
-    // 创建后显式抢焦点：菜单内容加载期间焦点可能被主窗口的 WebView 抢回。
-    let _ = menu.set_focus();
-    Ok(())
 }
 
 static TAB_MENU_TARGET: std::sync::Mutex<Option<String>> = std::sync::Mutex::new(None);
@@ -983,12 +947,12 @@ fn register_commands(builder: tauri::Builder<tauri::Wry>) -> tauri::Builder<taur
         install_extension,
         remove_extension,
         set_extension_enabled,
-        show_menu_window,
         show_tab_menu_window,
         show_extension_popup,
         toggle_extension_pin,
         check_update,
-        install_update
+        install_update,
+        set_shell_expanded
     ])
 }
 

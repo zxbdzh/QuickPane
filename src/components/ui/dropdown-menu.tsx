@@ -1,9 +1,7 @@
 import * as DropdownMenuPrimitive from "@radix-ui/react-dropdown-menu";
 import type { ComponentProps } from "react";
-import { motion } from "motion/react";
 
 import { cn } from "../../lib/utils";
-import { overlayIn } from "../../lib/motion";
 
 function DropdownMenu({ ...props }: ComponentProps<typeof DropdownMenuPrimitive.Root>) {
   return <DropdownMenuPrimitive.Root {...props} />;
@@ -22,17 +20,15 @@ function DropdownMenuContent({
   return (
     <DropdownMenuPrimitive.Portal>
       <DropdownMenuPrimitive.Content asChild sideOffset={sideOffset} {...props}>
-        <motion.div
-          initial="initial"
-          animate="animate"
-          variants={overlayIn}
+        <div
           className={cn(
             "z-50 min-w-[224px] overflow-hidden rounded-md border bg-popover p-1 text-popover-foreground shadow-popover",
+            "data-[state=open]:animate-overlay-rise data-[state=closed]:animate-overlay-fade",
             className,
           )}
         >
           {children}
-        </motion.div>
+        </div>
       </DropdownMenuPrimitive.Content>
     </DropdownMenuPrimitive.Portal>
   );

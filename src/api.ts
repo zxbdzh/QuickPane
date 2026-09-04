@@ -80,10 +80,10 @@ export const api = {
       extensionId,
       enabled,
     }),
-  showMenuWindow: (x: number, y: number) =>
-    invoke<void>("show_menu_window", { x, y }),
   showTabMenuWindow: (tabId: string, x: number, y: number) =>
     invoke<void>("show_tab_menu_window", { tabId, x, y }),
+  setShellExpanded: (expanded: boolean) =>
+    invoke<void>("set_shell_expanded", { expanded }),
   showExtensionPopup: (url: string, x?: number, y?: number) =>
     invoke<void>("show_extension_popup", { url, x: x ?? null, y: y ?? null }),
   toggleExtensionPin: (extensionId: string, pinned: boolean) =>

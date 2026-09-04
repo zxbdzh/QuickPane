@@ -23,14 +23,14 @@ await writeFile(modulePath, compiled);
 const { matchesTextQuery } = await import(pathToFileURL(modulePath).href);
 await rm(tempDir, { recursive: true, force: true });
 
-test("空查询匹配全部，文本查询忽略大小写和两端空格", () => {
-  assert.equal(matchesTextQuery("", "QuickPane"), true);
-  assert.equal(
-    matchesTextQuery("  DOCS ", "开发文档", "https://docs.example"),
-    true,
-  );
-  assert.equal(
-    matchesTextQuery("missing", "开发文档", "https://docs.example"),
-    false,
-  );
+test("历史和通用文本查询支持完整拼音与首字母", () => {
+  assert.equal(matchesTextQuery("kaifa", "开发文档"), true);
+  assert.equal(matchesTextQuery("kf", "开发文档"), true);
+  assert.equal(matchesTextQuery("不存在", "开发文档"), false);
+});
+
+test("英文原文匹配保持不变", () => {
+  assert.equal(matchesTextQuery("  DOCS ", "开发文档", "https://docs.example"), true);
+  assert.equal(matchesTextQuery("quick pane", "QuickPane"), false);
+  assert.equal(matchesTextQuery("missing", "开发文档", "https://docs.example"), false);
 });

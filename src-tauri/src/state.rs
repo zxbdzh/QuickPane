@@ -169,6 +169,39 @@ pub struct AppSnapshot {
     pub pinned_extensions: Vec<ExtInfo>,
     pub recovery_message: Option<String>,
 }
+
+impl AppSnapshot {
+    fn from_runtime(
+        runtime: &RuntimeData,
+        pinned_extensions: Vec<ExtInfo>,
+        recovery_message: Option<String>,
+    ) -> Self {
+        let is_redacted = runtime.locked || runtime.first_run;
+        let has_password = runtime.data.settings.password_hash.is_some();
+        let mut data = if is_redacted {
+            // 锁屏快照只保留空壳，避免通过 IPC 泄露历史、网址、下载路径或密码哈希。
+            PersistedData::default()
+        } else {
+            runtime.data.clone()
+        };
+        // 前端只需要 hasPassword；不要把可用于离线破解的 Argon2 哈希发送到 IPC 消费者。
+        data.settings.password_hash = None;
+        Self {
+            data,
+            locked: runtime.locked,
+            first_run: runtime.first_run,
+            has_password,
+            window_visible: runtime.window_visible,
+            pinned_extensions: if is_redacted {
+                Vec::new()
+            } else {
+                pinned_extensions
+            },
+            recovery_message,
+        }
+    }
+}
+
 #[derive(Clone)]
 pub struct RuntimeData {
     pub data: PersistedData,
@@ -177,6 +210,9 @@ pub struct RuntimeData {
     pub window_visible: bool,
     pub quitting: bool,
     pub shell_mode: bool,
+    /// 浏览态收缩：main WebView 只覆盖顶部 chrome（86px），网页区域无遮挡可交互；
+    /// 浮层/页面/锁屏需要时扩回满幅。
+    pub shell_collapsed: bool,
     pub previous_window: isize,
     pub hidden_since: Option<Instant>,
 }
@@ -228,6 +264,7 @@ impl AppState {
                 window_visible: true,
                 quitting: false,
                 shell_mode: true,
+                shell_collapsed: false,
                 previous_window: 0,
                 hidden_since: None,
             }),
@@ -275,34 +312,18 @@ impl AppState {
 
     pub fn snapshot(&self) -> AppSnapshot {
         let guard = self.inner.lock().expect("app state poisoned");
-        let has_password = guard.data.settings.password_hash.is_some();
+        let is_redacted = guard.locked || guard.first_run;
         let data_dir = self
             .path
             .parent()
             .map(Path::to_path_buf)
             .unwrap_or_default();
-        let locked = guard.locked || guard.first_run;
-        let mut data = if locked {
-            // 锁屏快照只保留空壳，避免通过 IPC 泄露历史、网址、下载路径或密码哈希。
-            PersistedData::default()
+        let pinned_extensions = if is_redacted {
+            Vec::new()
         } else {
-            guard.data.clone()
+            extensions::pinned_infos(&data_dir, &guard.data.settings.pinned_extensions)
         };
-        // 前端只需要 hasPassword；不要把可用于离线破解的 Argon2 哈希发送到 IPC 消费者。
-        data.settings.password_hash = None;
-        AppSnapshot {
-            data,
-            locked: guard.locked,
-            first_run: guard.first_run,
-            has_password,
-            window_visible: guard.window_visible,
-            pinned_extensions: if locked {
-                Vec::new()
-            } else {
-                extensions::pinned_infos(&data_dir, &guard.data.settings.pinned_extensions)
-            },
-            recovery_message: self.recovery_message.clone(),
-        }
+        AppSnapshot::from_runtime(&guard, pinned_extensions, self.recovery_message.clone())
     }
 
     pub fn save(&self) -> Result<(), String> {
@@ -453,6 +474,30 @@ mod tests {
     }
 
     #[test]
+    fn first_run_snapshot_redacts_persisted_data() {
+        let mut data = PersistedData::default();
+        data.settings.home_url = "https://private.example".into();
+        data.settings.password_hash = Some("stored-hash".into());
+        let runtime = RuntimeData {
+            data,
+            locked: false,
+            first_run: true,
+            window_visible: true,
+            quitting: false,
+            shell_mode: true,
+            shell_collapsed: false,
+            previous_window: 0,
+            hidden_since: None,
+        };
+
+        let snapshot = AppSnapshot::from_runtime(&runtime, Vec::new(), None);
+        assert_eq!(snapshot.data.settings.home_url, DEFAULT_HOME);
+        assert!(snapshot.first_run);
+        assert!(snapshot.has_password);
+        assert!(snapshot.data.settings.password_hash.is_none());
+    }
+
+    #[test]
     fn snapshot_never_exposes_password_hash() {
         let hash = AppState::hash_password("correct horse").expect("hash password");
         let mut data = PersistedData::default();
@@ -465,6 +510,7 @@ mod tests {
                 window_visible: true,
                 quitting: false,
                 shell_mode: true,
+                shell_collapsed: false,
                 previous_window: 0,
                 hidden_since: None,
             }),
@@ -490,6 +536,7 @@ mod tests {
                 window_visible: true,
                 quitting: false,
                 shell_mode: true,
+                shell_collapsed: false,
                 previous_window: 0,
                 hidden_since: None,
             }),
@@ -528,6 +575,7 @@ mod tests {
                 window_visible: true,
                 quitting: false,
                 shell_mode: true,
+                shell_collapsed: false,
                 previous_window: 0,
                 hidden_since: None,
             }),
@@ -581,6 +629,7 @@ mod tests {
                 window_visible: true,
                 quitting: false,
                 shell_mode: true,
+                shell_collapsed: false,
                 previous_window: 0,
                 hidden_since: None,
             }),

@@ -1,10 +1,8 @@
 import * as AlertDialogPrimitive from "@radix-ui/react-alert-dialog";
 import type { ComponentProps } from "react";
 import type { VariantProps } from "class-variance-authority";
-import { motion } from "motion/react";
 
 import { cn } from "../../lib/utils";
-import { EASE_OUT } from "../../lib/motion";
 import { buttonVariants } from "./button";
 
 function AlertDialog({ ...props }: ComponentProps<typeof AlertDialogPrimitive.Root>) {
@@ -22,18 +20,22 @@ function AlertDialogContent({
 }: ComponentProps<typeof AlertDialogPrimitive.Content>) {
   return (
     <AlertDialogPrimitive.Portal>
-      <AlertDialogPrimitive.Overlay className="fixed inset-0 z-50 bg-black/40 dark:bg-black/60" />
+      <AlertDialogPrimitive.Overlay
+        className={cn(
+          "fixed inset-0 z-50 bg-black/40 dark:bg-black/60",
+          "data-[state=open]:animate-scrim-in data-[state=closed]:animate-scrim-out",
+        )}
+      />
       <AlertDialogPrimitive.Content asChild {...props}>
-        <motion.div
-          initial={{ opacity: 0, scale: 0.97, y: 6 }}
-          animate={{ opacity: 1, scale: 1, y: 0, transition: { duration: 0.15, ease: EASE_OUT } }}
+        <div
           className={cn(
             "fixed top-1/2 left-1/2 z-50 w-[min(420px,calc(100vw-32px))] -translate-x-1/2 -translate-y-1/2 rounded-lg border bg-popover p-5 text-popover-foreground shadow-popover outline-none",
+            "data-[state=open]:animate-overlay-pop data-[state=closed]:animate-overlay-fade",
             className,
           )}
         >
           {children}
-        </motion.div>
+        </div>
       </AlertDialogPrimitive.Content>
     </AlertDialogPrimitive.Portal>
   );
