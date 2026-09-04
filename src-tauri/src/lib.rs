@@ -20,9 +20,9 @@ use tauri::{
     menu::{Menu, MenuItem, PredefinedMenuItem},
     AppHandle, Emitter, LogicalPosition, Manager, WindowEvent,
 };
-use tauri_plugin_global_shortcut::GlobalShortcutExt;
 use tauri_plugin_autostart::ManagerExt;
 use tauri_plugin_dialog::DialogExt;
+use tauri_plugin_global_shortcut::GlobalShortcutExt;
 use tauri_plugin_opener::OpenerExt;
 use tauri_plugin_updater::UpdaterExt;
 use url::Url;
@@ -225,12 +225,19 @@ fn validate_panel_shortcuts(update: &SettingsUpdate) -> Result<(), String> {
         }
         validate_shortcut(shortcut)?;
     }
-    if let Some(shortcut) = update.shortcut.as_deref().filter(|value| !value.trim().is_empty()) {
+    if let Some(shortcut) = update
+        .shortcut
+        .as_deref()
+        .filter(|value| !value.trim().is_empty())
+    {
         validate_shortcut(shortcut)?;
     }
     let mut seen = Vec::new();
     for (shortcut, label) in configured.into_iter().chain(
-        update.shortcut.as_deref().map(|value| (value.trim(), "显示 / 隐藏 QuickPane")),
+        update
+            .shortcut
+            .as_deref()
+            .map(|value| (value.trim(), "显示 / 隐藏 QuickPane")),
     ) {
         let normalized = normalized_shortcut(shortcut);
         if seen.iter().any(|(value, _)| *value == normalized) {
@@ -239,10 +246,24 @@ fn validate_panel_shortcuts(update: &SettingsUpdate) -> Result<(), String> {
         seen.push((normalized, label));
     }
     for fixed in [
-        "Ctrl+Tab", "Ctrl+Shift+Tab", "Ctrl+T", "Ctrl+Shift+T", "Ctrl+L", "Ctrl+W",
-        "Ctrl+H", "Ctrl+J", "Ctrl+D", "Ctrl+F", "Ctrl+=", "Ctrl+-", "Ctrl+0",
+        "Ctrl+Tab",
+        "Ctrl+Shift+Tab",
+        "Ctrl+T",
+        "Ctrl+Shift+T",
+        "Ctrl+L",
+        "Ctrl+W",
+        "Ctrl+H",
+        "Ctrl+J",
+        "Ctrl+D",
+        "Ctrl+F",
+        "Ctrl+=",
+        "Ctrl+-",
+        "Ctrl+0",
     ] {
-        if seen.iter().any(|(value, _)| *value == normalized_shortcut(fixed)) {
+        if seen
+            .iter()
+            .any(|(value, _)| *value == normalized_shortcut(fixed))
+        {
             return Err("快捷键与内置浏览器快捷键冲突".into());
         }
     }
@@ -258,7 +279,6 @@ fn apply_global_shortcut(app: &AppHandle, shortcut: Option<&str>) -> Result<(), 
             .map_err(|error| error.to_string()),
     }
 }
-
 
 fn validate_proxy_url(value: &str) -> Result<(), String> {
     let trimmed = value.trim();

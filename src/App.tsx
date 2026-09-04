@@ -17,7 +17,10 @@ import {
   getAddressSuggestions,
   type AddressSuggestion,
 } from "./lib/address-suggestions";
-import { browserShortcutFromKey, type ConfiguredBrowserShortcuts } from "./lib/browser-shortcuts";
+import {
+  browserShortcutFromKey,
+  type ConfiguredBrowserShortcuts,
+} from "./lib/browser-shortcuts";
 import { TooltipProvider } from "./components/ui/tooltip";
 import { TabStrip } from "./components/tab-strip";
 import { NavigationBar } from "./components/navigation-bar";
@@ -429,7 +432,11 @@ function App() {
       window.removeEventListener("keydown", handler);
       void cleanup.then((dispose) => dispose());
     };
-  }, [handleShortcut, snapshot.data.settings.recentlyClosedShortcut, snapshot.data.settings.tabSearchShortcut]);
+  }, [
+    handleShortcut,
+    snapshot.data.settings.recentlyClosedShortcut,
+    snapshot.data.settings.tabSearchShortcut,
+  ]);
 
   if (!ready) {
     return (
@@ -449,157 +456,159 @@ function App() {
           animate={snapshot.windowVisible ? "visible" : "hidden"}
           className={`flex h-full flex-col ${browsing ? "bg-transparent" : "bg-surface"}`}
         >
-        {locked ? null : (
-          <>
-            <TabStrip
-              tabs={snapshot.data.tabs}
-              activeId={snapshot.data.activeTabId}
-              onSelect={selectTab}
-              onContextMenu={openTabMenu}
-              onClose={(id) => void runSnapshot(() => api.removeTab(id))}
-              recentlyClosed={snapshot.data.recentlyClosed}
-              onRestoreClosed={(id) =>
-                void runSnapshot(() => api.restoreClosedTab(id))
-              }
-              onNew={() => createTab()}
-              onOverlayOpenChange={setTabStripOverlayOpen}
-              shortcutRequest={tabPanelShortcut}
-            />
-            <NavigationBar
-              activeTab={activeTab}
-              address={address}
-              onAddress={setAddress}
-              onSubmit={submitAddress}
-              addressRef={addressRef}
-              suggestions={addressSuggestions}
-              onSuggestion={selectSuggestion}
-              onOverlayOpenChange={setNavOverlayOpen}
-              windowVisible={snapshot.windowVisible}
-              bookmarked={Boolean(
-                activeTab &&
-                  snapshot.data.bookmarks.some(
-                    (item) => item.url === activeTab.url,
-                  ),
+          {locked ? null : (
+            <>
+              <TabStrip
+                tabs={snapshot.data.tabs}
+                activeId={snapshot.data.activeTabId}
+                onSelect={selectTab}
+                onContextMenu={openTabMenu}
+                onClose={(id) => void runSnapshot(() => api.removeTab(id))}
+                recentlyClosed={snapshot.data.recentlyClosed}
+                onRestoreClosed={(id) =>
+                  void runSnapshot(() => api.restoreClosedTab(id))
+                }
+                onNew={() => createTab()}
+                onOverlayOpenChange={setTabStripOverlayOpen}
+                shortcutRequest={tabPanelShortcut}
+              />
+              <NavigationBar
+                activeTab={activeTab}
+                address={address}
+                onAddress={setAddress}
+                onSubmit={submitAddress}
+                addressRef={addressRef}
+                suggestions={addressSuggestions}
+                onSuggestion={selectSuggestion}
+                onOverlayOpenChange={setNavOverlayOpen}
+                windowVisible={snapshot.windowVisible}
+                bookmarked={Boolean(
+                  activeTab &&
+                    snapshot.data.bookmarks.some(
+                      (item) => item.url === activeTab.url,
+                    ),
+                )}
+                onBookmark={() => {
+                  if (!activeTab?.url.startsWith("http")) return;
+                  void runSnapshot(() =>
+                    api.addBookmark(activeTab.title, activeTab.url),
+                  );
+                }}
+                onBack={() => void run(api.back)}
+                onForward={() => void run(api.forward)}
+                onReload={() => void run(api.reload)}
+                onHome={() => createTab(snapshot.data.settings.homeUrl)}
+                onHide={() => void run(api.hide)}
+                pinnedExtensions={snapshot.pinnedExtensions ?? []}
+                onExtensionClick={(extension, anchor) => {
+                  if (!extension.popupUrl) return;
+                  void run(() =>
+                    api.showExtensionPopup(
+                      extension.popupUrl as string,
+                      anchor.x,
+                      anchor.y,
+                    ),
+                  );
+                }}
+                hasPassword={snapshot.hasPassword}
+                onOpenSection={openSection}
+                onLockNow={() => void run(api.lockNow)}
+              />
+            </>
+          )}
+
+          <motion.section
+            initial={false}
+            variants={revealContent}
+            animate={snapshot.windowVisible ? "visible" : "hidden"}
+            className={`min-h-0 flex-1 ${locked || browsing ? "overflow-hidden" : "overflow-y-auto"}`}
+          >
+            <AnimatePresence mode="wait" initial={false}>
+              {locked ? (
+                <motion.div
+                  key="lock"
+                  className="h-full"
+                  variants={pageFade}
+                  initial="initial"
+                  animate="animate"
+                  exit="exit"
+                >
+                  <LockScreen
+                    snapshot={snapshot}
+                    applySnapshot={applySnapshot}
+                    run={run}
+                  />
+                </motion.div>
+              ) : browsing ? null : (
+                <motion.div
+                  key={section}
+                  className="min-h-full"
+                  variants={pageFade}
+                  initial="initial"
+                  animate="animate"
+                  exit="exit"
+                >
+                  {section === "newtab" &&
+                  activeTab?.url === "quickpane://newtab" ? (
+                    <NewTabPage
+                      snapshot={snapshot}
+                      onNavigate={(url) =>
+                        void runSnapshot(() => api.navigate(activeTab.id, url))
+                      }
+                      onSection={openSection}
+                      onUpdateQuickLinks={(quickLinks) =>
+                        void runSnapshot(() =>
+                          api.updateSettings({
+                            ...snapshot.data.settings,
+                            quickLinks,
+                          }),
+                        )
+                      }
+                    />
+                  ) : section === "history" ? (
+                    <HistoryPage
+                      snapshot={snapshot}
+                      onOpen={createTab}
+                      onClear={() => void runSnapshot(() => api.clearHistory())}
+                    />
+                  ) : section === "bookmarks" ? (
+                    <BookmarksPage
+                      snapshot={snapshot}
+                      onOpen={createTab}
+                      onRemove={(id) =>
+                        void runSnapshot(() => api.removeBookmark(id))
+                      }
+                    />
+                  ) : section === "downloads" ? (
+                    <DownloadsPage
+                      snapshot={snapshot}
+                      onOpen={(path) => void run(() => api.openDownload(path))}
+                      onClear={() =>
+                        void runSnapshot(() => api.clearDownloads())
+                      }
+                    />
+                  ) : section === "extensions" ? (
+                    <ExtensionsPage
+                      run={run}
+                      applySnapshot={applySnapshot}
+                      pinnedIds={snapshot.data.settings.pinnedExtensions ?? []}
+                      onOpen={(url) =>
+                        void run(() => api.showExtensionPopup(url))
+                      }
+                    />
+                  ) : section === "settings" ? (
+                    <SettingsPage
+                      snapshot={snapshot}
+                      applySnapshot={applySnapshot}
+                      run={run}
+                    />
+                  ) : null}
+                </motion.div>
               )}
-              onBookmark={() => {
-                if (!activeTab?.url.startsWith("http")) return;
-                void runSnapshot(() =>
-                  api.addBookmark(activeTab.title, activeTab.url),
-                );
-              }}
-              onBack={() => void run(api.back)}
-              onForward={() => void run(api.forward)}
-              onReload={() => void run(api.reload)}
-              onHome={() => createTab(snapshot.data.settings.homeUrl)}
-              onHide={() => void run(api.hide)}
-              pinnedExtensions={snapshot.pinnedExtensions ?? []}
-              onExtensionClick={(extension, anchor) => {
-                if (!extension.popupUrl) return;
-                void run(() =>
-                  api.showExtensionPopup(
-                    extension.popupUrl as string,
-                    anchor.x,
-                    anchor.y,
-                  ),
-                );
-              }}
-              hasPassword={snapshot.hasPassword}
-              onOpenSection={openSection}
-              onLockNow={() => void run(api.lockNow)}
-            />
-          </>
-        )}
+            </AnimatePresence>
+          </motion.section>
 
-        <motion.section
-          initial={false}
-          variants={revealContent}
-          animate={snapshot.windowVisible ? "visible" : "hidden"}
-          className={`min-h-0 flex-1 ${locked || browsing ? "overflow-hidden" : "overflow-y-auto"}`}
-        >
-          <AnimatePresence mode="wait" initial={false}>
-            {locked ? (
-              <motion.div
-                key="lock"
-                className="h-full"
-                variants={pageFade}
-                initial="initial"
-                animate="animate"
-                exit="exit"
-              >
-                <LockScreen
-                  snapshot={snapshot}
-                  applySnapshot={applySnapshot}
-                  run={run}
-                />
-              </motion.div>
-            ) : browsing ? null : (
-              <motion.div
-                key={section}
-                className="min-h-full"
-                variants={pageFade}
-                initial="initial"
-                animate="animate"
-                exit="exit"
-              >
-                {section === "newtab" &&
-                activeTab?.url === "quickpane://newtab" ? (
-                  <NewTabPage
-                    snapshot={snapshot}
-                    onNavigate={(url) =>
-                      void runSnapshot(() => api.navigate(activeTab.id, url))
-                    }
-                    onSection={openSection}
-                    onUpdateQuickLinks={(quickLinks) =>
-                      void runSnapshot(() =>
-                        api.updateSettings({
-                          ...snapshot.data.settings,
-                          quickLinks,
-                        }),
-                      )
-                    }
-                  />
-                ) : section === "history" ? (
-                  <HistoryPage
-                    snapshot={snapshot}
-                    onOpen={createTab}
-                    onClear={() => void runSnapshot(() => api.clearHistory())}
-                  />
-                ) : section === "bookmarks" ? (
-                  <BookmarksPage
-                    snapshot={snapshot}
-                    onOpen={createTab}
-                    onRemove={(id) =>
-                      void runSnapshot(() => api.removeBookmark(id))
-                    }
-                  />
-                ) : section === "downloads" ? (
-                  <DownloadsPage
-                    snapshot={snapshot}
-                    onOpen={(path) => void run(() => api.openDownload(path))}
-                    onClear={() => void runSnapshot(() => api.clearDownloads())}
-                  />
-                ) : section === "extensions" ? (
-                  <ExtensionsPage
-                    run={run}
-                    applySnapshot={applySnapshot}
-                    pinnedIds={snapshot.data.settings.pinnedExtensions ?? []}
-                    onOpen={(url) =>
-                      void run(() => api.showExtensionPopup(url))
-                    }
-                  />
-                ) : section === "settings" ? (
-                  <SettingsPage
-                    snapshot={snapshot}
-                    applySnapshot={applySnapshot}
-                    run={run}
-                  />
-                ) : null}
-              </motion.div>
-            )}
-          </AnimatePresence>
-        </motion.section>
-
-        <ErrorBanner error={error} onDismiss={() => setError(null)} />
+          <ErrorBanner error={error} onDismiss={() => setError(null)} />
         </motion.main>
       </TooltipProvider>
     </MotionConfig>

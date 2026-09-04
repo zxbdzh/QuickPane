@@ -24,8 +24,8 @@ use webview2_com::{
 };
 #[cfg(windows)]
 use windows::Win32::UI::Input::KeyboardAndMouse::{
-    GetKeyState, VK_0, VK_ADD, VK_CONTROL, VK_D, VK_F, VK_H, VK_J, VK_L, VK_MENU,
-    VK_OEM_MINUS, VK_OEM_PLUS, VK_SHIFT, VK_SUBTRACT, VK_T, VK_TAB, VK_W,
+    GetKeyState, VK_0, VK_ADD, VK_CONTROL, VK_D, VK_F, VK_H, VK_J, VK_L, VK_MENU, VK_OEM_MINUS,
+    VK_OEM_PLUS, VK_SHIFT, VK_SUBTRACT, VK_T, VK_TAB, VK_W,
 };
 
 pub const CHROME_HEIGHT: f64 = 86.0;
@@ -828,7 +828,7 @@ fn sink_tab_below_shell(app: &AppHandle) {
         use windows::Win32::Foundation::{POINT, RECT};
         use windows::Win32::Graphics::Gdi::MapWindowPoints;
         use windows::Win32::UI::WindowsAndMessaging::{
-            GetWindowRect, HWND_BOTTOM, SetWindowPos, SWP_NOACTIVATE, SWP_NOMOVE, SWP_NOSIZE,
+            GetWindowRect, SetWindowPos, HWND_BOTTOM, SWP_NOACTIVATE, SWP_NOMOVE, SWP_NOSIZE,
         };
 
         let ctx = &*(lparam.0 as *const SinkCtx);
@@ -837,13 +837,20 @@ fn sink_tab_below_shell(app: &AppHandle) {
             return BOOL(1);
         }
         let mut corners = [
-            POINT { x: rect.left, y: rect.top },
-            POINT { x: rect.right, y: rect.bottom },
+            POINT {
+                x: rect.left,
+                y: rect.top,
+            },
+            POINT {
+                x: rect.right,
+                y: rect.bottom,
+            },
         ];
         unsafe { MapWindowPoints(None, Some(ctx.parent), &mut corners) };
-        let covers_client =
-            corners[0].x <= 0 && corners[0].y <= 0 && corners[1].x >= ctx.client.right
-                && corners[1].y >= ctx.client.bottom;
+        let covers_client = corners[0].x <= 0
+            && corners[0].y <= 0
+            && corners[1].x >= ctx.client.right
+            && corners[1].y >= ctx.client.bottom;
         if !covers_client {
             unsafe {
                 let _ = SetWindowPos(
@@ -947,9 +954,7 @@ pub fn set_shell_expanded(app: &AppHandle, expanded: bool) -> Result<(), String>
     shell
         .set_position(LogicalPosition::new(0.0, 0.0))
         .map_err(|error| error.to_string())?;
-    shell
-        .set_size(target)
-        .map_err(|error| error.to_string())?;
+    shell.set_size(target).map_err(|error| error.to_string())?;
     Ok(())
 }
 
@@ -1111,8 +1116,8 @@ fn install_tab_shortcuts(app: &AppHandle, webview: &tauri::Webview) -> Result<()
                     let ctrl = unsafe { GetKeyState(VK_CONTROL.0 as i32) } < 0;
                     let shift = unsafe { GetKeyState(VK_SHIFT.0 as i32) } < 0;
                     let alt = unsafe { GetKeyState(VK_MENU.0 as i32) } < 0;
-                    let shortcut = configured_tab_action(&app, ctrl, shift, alt, key as u16)
-                        .or(match (ctrl, shift, key as u16) {
+                    let shortcut = configured_tab_action(&app, ctrl, shift, alt, key as u16).or(
+                        match (ctrl, shift, key as u16) {
                             (true, false, key) if key == VK_TAB.0 => Some("next-tab"),
                             (true, true, key) if key == VK_TAB.0 => Some("previous-tab"),
                             (true, false, key) if key == VK_T.0 => Some("new-tab"),
@@ -1123,11 +1128,16 @@ fn install_tab_shortcuts(app: &AppHandle, webview: &tauri::Webview) -> Result<()
                             (true, false, key) if key == VK_J.0 => Some("downloads"),
                             (true, false, key) if key == VK_D.0 => Some("bookmark"),
                             (true, false, key) if key == VK_F.0 => Some("find"),
-                            (true, false, key) if key == VK_OEM_PLUS.0 || key == VK_ADD.0 => Some("zoom-in"),
-                            (true, false, key) if key == VK_OEM_MINUS.0 || key == VK_SUBTRACT.0 => Some("zoom-out"),
+                            (true, false, key) if key == VK_OEM_PLUS.0 || key == VK_ADD.0 => {
+                                Some("zoom-in")
+                            }
+                            (true, false, key) if key == VK_OEM_MINUS.0 || key == VK_SUBTRACT.0 => {
+                                Some("zoom-out")
+                            }
                             (true, false, key) if key == VK_0.0 => Some("zoom-reset"),
                             _ => None,
-                        });
+                        },
+                    );
                     let Some(shortcut) = shortcut else {
                         return Ok(());
                     };

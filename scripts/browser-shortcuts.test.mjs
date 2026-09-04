@@ -21,7 +21,7 @@ const tempDir = await mkdtemp(
 const modulePath = join(tempDir, "browser-shortcuts.mjs");
 await writeFile(modulePath, compiled);
 const { browserShortcutFromKey, findShortcutConflict } = await import(
-  pathToFileURL(modulePath).href,
+  pathToFileURL(modulePath).href
 );
 await rm(tempDir, { recursive: true, force: true });
 

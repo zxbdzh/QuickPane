@@ -50,7 +50,9 @@ function TabStrip({
 
   useEffect(() => {
     if (!shortcutRequest) return;
-    setPanel((current) => (current === shortcutRequest.panel ? null : shortcutRequest.panel));
+    setPanel((current) =>
+      current === shortcutRequest.panel ? null : shortcutRequest.panel,
+    );
   }, [shortcutRequest]);
 
   useEffect(() => {

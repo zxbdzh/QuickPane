@@ -74,7 +74,8 @@ function normalizedShortcut(shortcut: string): string | null {
 function eventShortcut(event: ShortcutKeyEvent): string | null {
   if (!(event.ctrlKey || event.altKey || event.shiftKey || event.metaKey))
     return null;
-  const key = event.key.length === 1 ? event.key.toLowerCase() : event.key.toLowerCase();
+  const key =
+    event.key.length === 1 ? event.key.toLowerCase() : event.key.toLowerCase();
   return normalizedShortcut(
     [
       event.ctrlKey ? "Ctrl" : "",
@@ -122,8 +123,10 @@ export function browserShortcutFromKey(
   },
 ): BrowserShortcut | null {
   const normalized = eventShortcut(event);
-  if (normalized === normalizedShortcut(configured.tabSearch)) return "tab-search";
-  if (normalized === normalizedShortcut(configured.recentlyClosed)) return "recently-closed";
+  if (normalized === normalizedShortcut(configured.tabSearch))
+    return "tab-search";
+  if (normalized === normalizedShortcut(configured.recentlyClosed))
+    return "recently-closed";
 
   const key = event.key.toLowerCase();
   if (key === "escape") return "escape";
