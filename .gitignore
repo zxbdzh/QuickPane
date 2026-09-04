@@ -30,3 +30,8 @@ dist-ssr
 .pi/
 output/
 nul
+
+# Project-local research and specification drafts
+.trae/
+docs/research/quickpane-maturity-gap-report-2026-09-03.md
+docs/specs/
