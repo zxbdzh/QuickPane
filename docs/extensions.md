@@ -1,5 +1,7 @@
 # QuickPane 浏览器扩展支持设计
 
+用户侧只需知道：目前只支持未打包扩展文件夹（目录内要有 `manifest.json`）。在扩展页选择文件夹即可安装；`.crx` 需要先自行解包。应用锁不加密扩展目录。
+
 ## 现状（已实现）
 
 基于 WebView2 的原生扩展能力（`Profile.AddBrowserExtension`），通过 Tauri 2.11 / wry 0.55 透传的 `browser_extensions_enabled` + `extensions_path` 配置实现，无需 fork 依赖。

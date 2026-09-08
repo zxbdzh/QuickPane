@@ -2,11 +2,11 @@
 
 ## 发布流程
 
-1. 在本地更新 `package.json` 和 `src-tauri/tauri.conf.json` 的版本号，并提交代码。
+1. 在本地同步更新 `package.json`、`src-tauri/Cargo.toml`、`src-tauri/Cargo.lock` 和 `src-tauri/tauri.conf.json` 的版本号，并提交代码。
 2. 创建并推送版本标签，例如 `git tag v0.1.1 && git push origin v0.1.1`。
 3. GitHub Actions 的 `Release` 工作流在 Windows runner 上安装依赖、构建 Tauri NSIS 安装包，并使用 minisign 生成 updater 签名。
 4. 工作流创建 GitHub Release，上传安装包及签名，然后生成并上传 `latest.json`。
-5. 如果配置了 MinIO Secrets，工作流会将同一安装包、签名和 `latest.json` 同步到自部署的 MinIO bucket；没有配置时 GitHub Release 仍然可用。
+5. 如果配置了 MinIO Secrets，工作流会将同一安装包、签名和 `latest.json` 同步到自部署的 MinIO bucket。MinIO 同步失败不影响 GitHub Release 下载；GitHub 始终是客户端更新的兜底源。
 
 ## 更新源
 
