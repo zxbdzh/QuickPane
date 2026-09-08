@@ -1,4 +1,5 @@
 import {
+  Camera,
   ChevronDown,
   Layers,
   Pencil,
@@ -22,6 +23,7 @@ function WorkspaceMenu({
   onRename,
   onRemove,
   onSwitch,
+  onSaveSnapshot,
   onOpenChange,
 }: {
   workspaces: Workspace[];
@@ -32,6 +34,7 @@ function WorkspaceMenu({
   onRename: (workspaceId: string, name: string) => void;
   onRemove: (workspaceId: string) => void;
   onSwitch: (workspaceId: string) => void;
+  onSaveSnapshot: (name: string) => void;
   /** 开合上报：驱动 main WebView 扩幅，保证下拉盖在网页上。 */
   onOpenChange: (open: boolean) => void;
 }) {
@@ -40,14 +43,16 @@ function WorkspaceMenu({
   const [renameValue, setRenameValue] = useState("");
   const [creating, setCreating] = useState(false);
   const [createValue, setCreateValue] = useState("");
+  const [savingSnapshot, setSavingSnapshot] = useState(false);
+  const [snapshotValue, setSnapshotValue] = useState("");
   const [removeConfirmId, setRemoveConfirmId] = useState<string | null>(null);
   const renameInputRef = useRef<HTMLInputElement>(null);
   const createInputRef = useRef<HTMLInputElement>(null);
+  const snapshotInputRef = useRef<HTMLInputElement>(null);
   const removeTimer = useRef<number | null>(null);
 
   const activeWorkspace =
-    workspaces.find((workspace) => workspace.id === activeWorkspaceId) ??
-    null;
+    workspaces.find((workspace) => workspace.id === activeWorkspaceId) ?? null;
   const canRemoveAny = workspaces.length > 1;
 
   useEffect(() => {
@@ -62,6 +67,10 @@ function WorkspaceMenu({
     if (creating) createInputRef.current?.focus();
   }, [creating]);
 
+  useEffect(() => {
+    if (savingSnapshot) snapshotInputRef.current?.focus();
+  }, [savingSnapshot]);
+
   useEffect(
     () => () => {
       if (removeTimer.current !== null)
@@ -75,7 +84,16 @@ function WorkspaceMenu({
     setRenamingId(null);
     setCreating(false);
     setCreateValue("");
+    setSavingSnapshot(false);
+    setSnapshotValue("");
     setRemoveConfirmId(null);
+  };
+
+  const commitSnapshot = () => {
+    const name = snapshotValue.trim();
+    if (!name) return;
+    onSaveSnapshot(name);
+    close();
   };
 
   const commitRename = (workspaceId: string) => {
@@ -95,8 +113,7 @@ function WorkspaceMenu({
       return;
     }
     setRemoveConfirmId(workspaceId);
-    if (removeTimer.current !== null)
-      window.clearTimeout(removeTimer.current);
+    if (removeTimer.current !== null) window.clearTimeout(removeTimer.current);
     removeTimer.current = window.setTimeout(
       () => setRemoveConfirmId(null),
       2500,
@@ -120,9 +137,7 @@ function WorkspaceMenu({
         )}
       >
         <Layers className="size-3.5 shrink-0 text-primary" />
-        <span className="truncate">
-          {activeWorkspace?.name ?? "工作区"}
-        </span>
+        <span className="truncate">{activeWorkspace?.name ?? "工作区"}</span>
         <ChevronDown className="size-3 shrink-0" />
       </button>
 
@@ -220,7 +235,7 @@ function WorkspaceMenu({
                           {workspace.name}
                         </span>
                       </button>
-                      <span className="shrink-0 font-mono text-[10px] text-faint">
+                      <span className="shrink-0 font-mono text-xs text-faint opacity-70">
                         {count} 标签
                       </span>
                       <button
@@ -260,9 +275,7 @@ function WorkspaceMenu({
                       <input
                         ref={createInputRef}
                         value={createValue}
-                        onChange={(event) =>
-                          setCreateValue(event.target.value)
-                        }
+                        onChange={(event) => setCreateValue(event.target.value)}
                         onKeyDown={(event) => {
                           if (event.key === "Enter") {
                             event.preventDefault();
@@ -291,11 +304,56 @@ function WorkspaceMenu({
                       onClick={() => {
                         setCreating(true);
                         setCreateValue("");
+                        setSavingSnapshot(false);
                       }}
                       className="flex h-8 w-full items-center gap-2 rounded-md px-2 text-xs text-muted-foreground transition-colors hover:bg-muted hover:text-foreground focus-visible:outline-none"
                     >
                       <Plus className="size-3.5" />
                       新建工作区
+                    </button>
+                  )}
+                  {savingSnapshot ? (
+                    <div className="mt-1 flex h-9 items-center rounded-md bg-muted px-1.5">
+                      <input
+                        ref={snapshotInputRef}
+                        value={snapshotValue}
+                        onChange={(event) =>
+                          setSnapshotValue(event.target.value)
+                        }
+                        onKeyDown={(event) => {
+                          if (event.key === "Enter") {
+                            event.preventDefault();
+                            commitSnapshot();
+                          } else if (event.key === "Escape") {
+                            event.preventDefault();
+                            event.stopPropagation();
+                            setSavingSnapshot(false);
+                            setSnapshotValue("");
+                          }
+                        }}
+                        maxLength={40}
+                        placeholder="快照名称"
+                        aria-label="会话快照名称"
+                        className="h-7 min-w-0 flex-1 rounded-sm border border-input bg-background px-1.5 text-xs outline-none placeholder:text-faint focus-visible:border-ring"
+                      />
+                    </div>
+                  ) : (
+                    <button
+                      type="button"
+                      role="menuitem"
+                      onClick={() => {
+                        setSavingSnapshot(true);
+                        setCreating(false);
+                        setSnapshotValue(
+                          activeWorkspace?.name
+                            ? `${activeWorkspace.name} 快照`
+                            : "会话快照",
+                        );
+                      }}
+                      className="flex h-8 w-full items-center gap-2 rounded-md px-2 text-xs text-muted-foreground transition-colors hover:bg-muted hover:text-foreground focus-visible:outline-none"
+                    >
+                      <Camera className="size-3.5" />
+                      存为快照
                     </button>
                   )}
                 </div>

@@ -25,12 +25,14 @@ try {
     new URL("../src/lib/quick-search.ts", import.meta.url),
     "utf8",
   );
-  const quickCompiled = ts.transpileModule(quickSource, {
-    compilerOptions: {
-      module: ts.ModuleKind.ESNext,
-      target: ts.ScriptTarget.ES2020,
-    },
-  }).outputText.replace(/from "\.\/text-search"/u, 'from "./text-search.mjs"');
+  const quickCompiled = ts
+    .transpileModule(quickSource, {
+      compilerOptions: {
+        module: ts.ModuleKind.ESNext,
+        target: ts.ScriptTarget.ES2020,
+      },
+    })
+    .outputText.replace(/from "\.\/text-search"/u, 'from "./text-search.mjs"');
   await writeFile(join(tempDir, "quick-search.mjs"), quickCompiled);
   var { quickSearch, parseSearchKeyword } = await import(
     pathToFileURL(join(tempDir, "quick-search.mjs")).href
@@ -55,31 +57,65 @@ const tab = (id, title, url, extra = {}) => ({
 });
 const source = {
   tabs: [
-    tab("t1", "GitHub", "https://github.com", { lastActiveAt: "2026-09-01T11:00:00.000Z" }),
-    tab("t2", "开发文档", "https://docs.example", { lastActiveAt: "2026-09-01T11:30:00.000Z" }),
+    tab("t1", "GitHub", "https://github.com", {
+      lastActiveAt: "2026-09-01T11:00:00.000Z",
+    }),
+    tab("t2", "开发文档", "https://docs.example", {
+      lastActiveAt: "2026-09-01T11:30:00.000Z",
+    }),
   ],
   recentlyClosed: [tab("c1", "关闭的购物车", "https://shop.example")],
   workspaces: [{ id: "w1", name: "学习", tabs: [], activeTabId: null }],
-  bookmarks: [{ id: "b1", title: "MDN", url: "https://developer.mozilla.org", createdAt: now }],
-  history: [{ id: "h1", title: "新闻", url: "https://news.example", visitedAt: now }],
+  bookmarks: [
+    {
+      id: "b1",
+      title: "MDN",
+      url: "https://developer.mozilla.org",
+      createdAt: now,
+    },
+  ],
+  history: [
+    { id: "h1", title: "新闻", url: "https://news.example", visitedAt: now },
+  ],
+  sessionSnapshots: [
+    {
+      id: "s1",
+      name: "性能排查",
+      createdAt: now,
+      activeIndex: 0,
+      tabs: [
+        { url: "https://perf.example", title: "Perf Report", pinned: false },
+      ],
+    },
+  ],
 };
 
-test("空查询只出最近上下文：标签、最近关闭、其它工作区", () => {
+test("空查询只出最近上下文：标签、最近关闭、其它工作区、会话快照", () => {
   const groups = quickSearch({ query: "", ...source });
-  assert.deepEqual(groups.map((group) => group.key), ["tab", "closed", "workspace"]);
-  assert.deepEqual(groups[0].items.map((item) => item.tabId), ["t2", "t1"]);
+  assert.deepEqual(
+    groups.map((group) => group.key),
+    ["tab", "closed", "workspace", "snapshot"],
+  );
+  assert.deepEqual(
+    groups[0].items.map((item) => item.tabId),
+    ["t2", "t1"],
+  );
+  assert.equal(
+    groups.find((g) => g.key === "snapshot").items[0].snapshotId,
+    "s1",
+  );
 });
 
-test("有查询时五组全搜并按拼音匹配", () => {
+test("有查询时六组全搜并按拼音匹配", () => {
   const groups = quickSearch({ query: "kaifa", ...source });
-  assert.deepEqual(groups.map((group) => group.key), [
-    "tab",
-    "closed",
-    "workspace",
-    "bookmark",
-    "history",
-  ]);
-  assert.deepEqual(groups[0].items.map((item) => item.tabId), ["t2"]);
+  assert.deepEqual(
+    groups.map((group) => group.key),
+    ["tab", "closed", "workspace", "snapshot", "bookmark", "history"],
+  );
+  assert.deepEqual(
+    groups[0].items.map((item) => item.tabId),
+    ["t2"],
+  );
 });
 
 test("标签按最近活跃降序，休眠标志随行", () => {
@@ -108,15 +144,29 @@ test("最近关闭限额：空查询 5 条，有查询 8 条", () => {
     tab(`c${index}`, `页面 ${index}`, `https://closed-${index}.example`),
   );
   const idle = quickSearch({ query: "", ...source, recentlyClosed: closed });
-  const active = quickSearch({ query: "页面", ...source, recentlyClosed: closed });
+  const active = quickSearch({
+    query: "页面",
+    ...source,
+    recentlyClosed: closed,
+  });
   assert.equal(idle.find((group) => group.key === "closed").items.length, 5);
   assert.equal(active.find((group) => group.key === "closed").items.length, 8);
 });
 
 test("历史按访问时间降序且 URL 去重，限额 8", () => {
   const history = [
-    { id: "h1", title: "较旧", url: "https://same.example", visitedAt: "2026-08-01T00:00:00.000Z" },
-    { id: "h2", title: "较新", url: "https://same.example/", visitedAt: "2026-09-01T00:00:00.000Z" },
+    {
+      id: "h1",
+      title: "较旧",
+      url: "https://same.example",
+      visitedAt: "2026-08-01T00:00:00.000Z",
+    },
+    {
+      id: "h2",
+      title: "较新",
+      url: "https://same.example/",
+      visitedAt: "2026-09-01T00:00:00.000Z",
+    },
     ...Array.from({ length: 9 }, (_, index) => ({
       id: `x${index}`,
       title: `条目 ${index}`,
@@ -124,7 +174,12 @@ test("历史按访问时间降序且 URL 去重，限额 8", () => {
       visitedAt: `2026-08-2${index}T00:00:00.000Z`,
     })),
   ];
-  const groups = quickSearch({ query: "", filter: "history", ...source, history });
+  const groups = quickSearch({
+    query: "",
+    filter: "history",
+    ...source,
+    history,
+  });
   const items = groups[0].items;
   assert.equal(items.length, 8);
   assert.equal(items[0].title, "较新");
@@ -133,10 +188,14 @@ test("历史按访问时间降序且 URL 去重，限额 8", () => {
 
 test("filter 指定组时空词列出该源全部", () => {
   const groups = quickSearch({ query: "", filter: "bookmark", ...source });
-  assert.deepEqual(groups.map((group) => group.key), ["bookmark"]);
-  assert.deepEqual(groups[0].items.map((item) => item.url), [
-    "https://developer.mozilla.org",
-  ]);
+  assert.deepEqual(
+    groups.map((group) => group.key),
+    ["bookmark"],
+  );
+  assert.deepEqual(
+    groups[0].items.map((item) => item.url),
+    ["https://developer.mozilla.org"],
+  );
 });
 
 test("书签限额 6 条", () => {
@@ -147,7 +206,10 @@ test("书签限额 6 条", () => {
     createdAt: now,
   }));
   const groups = quickSearch({ query: "书签", ...source, bookmarks });
-  assert.equal(groups.find((group) => group.key === "bookmark").items.length, 6);
+  assert.equal(
+    groups.find((group) => group.key === "bookmark").items.length,
+    6,
+  );
 });
 
 test("工作区按名称匹配", () => {
@@ -160,10 +222,39 @@ test("工作区按名称匹配", () => {
 test("parseSearchKeyword 识别关键字与边界", () => {
   assert.deepEqual(parseSearchKeyword("t "), { source: "tab", term: "" });
   assert.deepEqual(parseSearchKeyword("t:"), { source: "tab", term: "" });
-  assert.deepEqual(parseSearchKeyword("T github"), { source: "tab", term: "github" });
-  assert.deepEqual(parseSearchKeyword("b：MDN"), { source: "bookmark", term: "MDN" });
-  assert.deepEqual(parseSearchKeyword("h  新闻 "), { source: "history", term: "新闻" });
+  assert.deepEqual(parseSearchKeyword("T github"), {
+    source: "tab",
+    term: "github",
+  });
+  assert.deepEqual(parseSearchKeyword("b：MDN"), {
+    source: "bookmark",
+    term: "MDN",
+  });
+  assert.deepEqual(parseSearchKeyword("h  新闻 "), {
+    source: "history",
+    term: "新闻",
+  });
   assert.deepEqual(parseSearchKeyword("t"), { source: null, term: "t" });
-  assert.deepEqual(parseSearchKeyword("typescript"), { source: null, term: "typescript" });
+  assert.deepEqual(parseSearchKeyword("typescript"), {
+    source: null,
+    term: "typescript",
+  });
   assert.deepEqual(parseSearchKeyword("  "), { source: null, term: "" });
+});
+
+test("会话快照按名称和包含标签匹配", () => {
+  const hitName = quickSearch({ query: "xingneng", ...source });
+  assert.equal(
+    hitName.find((group) => group.key === "snapshot").items.length,
+    1,
+  );
+
+  const hitTab = quickSearch({ query: "report", ...source });
+  assert.equal(
+    hitTab.find((group) => group.key === "snapshot").items.length,
+    1,
+  );
+
+  const miss = quickSearch({ query: "不存在的快照", ...source });
+  assert.equal(miss.find((group) => group.key === "snapshot").items.length, 0);
 });

@@ -49,6 +49,17 @@ export const api = {
     invoke<AppSnapshot>("apply_tab_batch", {
       update: { action, tabIds, workspaceId: workspaceId ?? null },
     }),
+  saveSessionSnapshot: (name: string) =>
+    invoke<AppSnapshot>("save_session_snapshot", { name }),
+  deleteSessionSnapshot: (snapshotId: string) =>
+    invoke<AppSnapshot>("delete_session_snapshot", { snapshotId }),
+  renameSessionSnapshot: (snapshotId: string, name: string) =>
+    invoke<AppSnapshot>("rename_session_snapshot", { snapshotId, name }),
+  restoreSessionSnapshot: (snapshotId: string, asNewWorkspace: boolean) =>
+    invoke<AppSnapshot>("restore_session_snapshot", {
+      snapshotId,
+      asNewWorkspace,
+    }),
   navigate: (tabId: string, input: string) =>
     invoke<AppSnapshot>("navigate", { tabId, input }),
   reload: () => invoke<void>("reload"),

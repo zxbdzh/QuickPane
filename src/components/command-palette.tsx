@@ -1,4 +1,5 @@
 import {
+  Camera,
   Clock3,
   Globe2,
   Layers,
@@ -14,6 +15,7 @@ import { createPortal } from "react-dom";
 import type {
   Bookmark,
   HistoryEntry,
+  SessionSnapshot,
   TabRecord,
   Workspace,
 } from "../types";
@@ -25,11 +27,12 @@ import {
 } from "../lib/quick-search";
 import { cn } from "../lib/utils";
 
-/** 统一快速切换面板：标签 / 最近关闭 / 工作区 / 书签 / 历史 五源一屏检索。 */
+/** 统一快速切换面板：标签 / 最近关闭 / 工作区 / 快照 / 书签 / 历史 六源一屏检索。 */
 const GROUP_ORDER: QuickSearchGroupKey[] = [
   "tab",
   "closed",
   "workspace",
+  "snapshot",
   "bookmark",
   "history",
 ];
@@ -38,6 +41,7 @@ const GROUP_LABELS: Record<QuickSearchGroupKey, string> = {
   tab: "标签页",
   closed: "最近关闭",
   workspace: "工作区",
+  snapshot: "会话快照",
   bookmark: "书签",
   history: "历史",
 };
@@ -46,6 +50,7 @@ const GROUP_ICONS: Record<QuickSearchGroupKey, typeof Globe2> = {
   tab: Globe2,
   closed: RotateCcw,
   workspace: Layers,
+  snapshot: Camera,
   bookmark: Star,
   history: Clock3,
 };
@@ -55,12 +60,14 @@ function CommandPalette({
   tabs,
   recentlyClosed,
   workspaces,
+  sessionSnapshots,
   bookmarks,
   history,
   activeTabId,
   onSelectTab,
   onRestoreClosed,
   onSwitchWorkspace,
+  onRestoreSnapshot,
   onOpenUrl,
   onOpenChange,
 }: {
@@ -70,12 +77,14 @@ function CommandPalette({
   recentlyClosed: TabRecord[];
   /** 调用方传入「其它工作区」（排除当前激活）。 */
   workspaces: Workspace[];
+  sessionSnapshots: SessionSnapshot[];
   bookmarks: Bookmark[];
   history: HistoryEntry[];
   activeTabId: string | null;
   onSelectTab: (tabId: string) => void;
   onRestoreClosed: (tabId: string) => void;
   onSwitchWorkspace: (workspaceId: string) => void;
+  onRestoreSnapshot: (snapshotId: string) => void;
   onOpenUrl: (url: string) => void;
   /** 开合上报：驱动 main WebView 扩幅，保证面板盖在网页上。 */
   onOpenChange: (open: boolean) => void;
@@ -134,10 +143,11 @@ function CommandPalette({
         tabs,
         recentlyClosed,
         workspaces,
+        sessionSnapshots,
         bookmarks,
         history,
       }),
-    [bookmarks, filter, history, query, recentlyClosed, tabs, workspaces],
+    [bookmarks, filter, history, query, recentlyClosed, sessionSnapshots, tabs, workspaces],
   );
   const flatItems = useMemo(
     () => groups.flatMap((group) => group.items),
@@ -169,6 +179,8 @@ function CommandPalette({
       onRestoreClosed(item.tabId);
     else if (item.group === "workspace" && item.workspaceId)
       onSwitchWorkspace(item.workspaceId);
+    else if (item.group === "snapshot" && item.snapshotId)
+      onRestoreSnapshot(item.snapshotId);
     else if (item.url) onOpenUrl(item.url);
     close();
   };
@@ -230,7 +242,7 @@ function CommandPalette({
               aria-label="快速切换搜索"
               className="min-w-0 flex-1 bg-transparent text-sm outline-none placeholder:text-muted-foreground"
             />
-            <span className="shrink-0 font-mono text-[11px] text-faint">
+            <span className="shrink-0 font-mono text-xs text-faint opacity-80">
               {flatItems.length}
             </span>
           </div>
@@ -245,7 +257,7 @@ function CommandPalette({
                   setActiveIndex(0);
                 }}
                 className={cn(
-                  "rounded-full border px-2 py-0.5 font-mono text-[11px] transition-colors",
+                  "rounded-full border px-2 py-0.5 font-mono text-xs transition-colors",
                   filter === key
                     ? "border-primary/40 bg-primary/10 text-primary"
                     : "border-border text-muted-foreground hover:border-foreground/20 hover:text-foreground",
@@ -263,10 +275,10 @@ function CommandPalette({
                 return (
                   <section key={group.key} aria-label={GROUP_LABELS[group.key]}>
                     <header className="sticky top-0 z-10 flex items-center justify-between border-b border-border/60 bg-popover/95 px-3 py-1.5 backdrop-blur-sm">
-                      <span className="font-mono text-[10px] tracking-widest text-faint uppercase">
+                      <span className="font-mono text-xs tracking-widest text-faint opacity-80 uppercase">
                         {GROUP_LABELS[group.key]}
                       </span>
-                      <span className="font-mono text-[10px] text-faint">
+                      <span className="font-mono text-xs text-faint opacity-70">
                         {group.items.length}
                       </span>
                     </header>
@@ -307,19 +319,23 @@ function CommandPalette({
                             />
                           ) : null}
                           {isCurrentTab ? (
-                            <span className="shrink-0 font-mono text-[10px] text-accent2">
+                            <span className="shrink-0 font-mono text-xs text-accent2 opacity-90">
                               当前
                             </span>
                           ) : null}
                           {item.group === "workspace" ? (
-                            <span className="shrink-0 font-mono text-[10px] text-faint">
+                            <span className="shrink-0 font-mono text-xs text-faint opacity-70">
                               {workspaces
                                 .find((ws) => ws.id === item.workspaceId)
                                 ?.tabs.length ?? 0}{" "}
                               标签
                             </span>
+                          ) : item.group === "snapshot" ? (
+                            <span className="shrink-0 font-mono text-xs text-primary/80">
+                              Enter 恢复
+                            </span>
                           ) : item.url ? (
-                            <span className="hidden max-w-44 shrink-0 truncate font-mono text-[11px] text-faint min-[480px]:block">
+                            <span className="hidden max-w-44 shrink-0 truncate font-mono text-xs text-faint opacity-70 min-[480px]:block">
                               {item.url}
                             </span>
                           ) : null}
@@ -336,7 +352,7 @@ function CommandPalette({
             )}
           </div>
 
-          <footer className="flex h-7 shrink-0 items-center justify-between border-t px-3.5 font-mono text-[10px] text-faint">
+          <footer className="flex h-7 shrink-0 items-center justify-between border-t px-3.5 font-mono text-xs text-faint opacity-70">
             <span>↑↓ 选择</span>
             <span>Enter 跳转</span>
             <span>Esc 关闭</span>

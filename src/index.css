@@ -185,8 +185,8 @@
 .dark {
   --background: oklch(0.16 0.012 260);
   --foreground: oklch(0.928 0.003 260);
-  --surface: oklch(0.205 0.013 262);
-  --chrome: oklch(0.185 0.012 260);
+  --surface: oklch(0.212 0.013 262);
+  --chrome: oklch(0.177 0.012 260);
   --muted: oklch(0.24 0.014 262);
   --muted-foreground: oklch(0.715 0.007 262);
   --faint: oklch(0.55 0.008 262);

@@ -93,6 +93,13 @@ function NavigationBar({ activeTab, address, onAddress, onSubmit, addressRef, su
     }
   }, [windowVisible]);
 
+  useEffect(() => {
+    if (selectedSuggestion < 0 || !suggestionsOpen) return;
+    document
+      .getElementById(`address-suggestion-${selectedSuggestion}`)
+      ?.scrollIntoView({ block: "nearest" });
+  }, [selectedSuggestion, suggestionsOpen]);
+
   useEffect(
     () => () => {
       if (copyTimer.current !== null) window.clearTimeout(copyTimer.current);
@@ -268,13 +275,13 @@ function NavigationBar({ activeTab, address, onAddress, onSubmit, addressRef, su
               {moveTargetTabId ? (
                 <>
                   <div className="flex items-center justify-between border-b border-border/60 px-2 py-1.5">
-                    <span className="font-mono text-[10px] tracking-widest text-faint uppercase">
+                    <span className="font-mono text-xs tracking-widest text-faint opacity-80 uppercase">
                       移入工作区
                     </span>
                     <button
                       type="button"
                       onClick={() => setMoveTargetTabId(null)}
-                      className="font-mono text-[11px] text-muted-foreground transition-colors hover:text-foreground"
+                      className="font-mono text-xs text-muted-foreground opacity-80 transition-[color,opacity] hover:text-foreground hover:opacity-100"
                     >
                       返回
                     </button>
@@ -292,7 +299,7 @@ function NavigationBar({ activeTab, address, onAddress, onSubmit, addressRef, su
                       >
                         <Layers className="size-4 shrink-0 text-muted-foreground" />
                         <span className="min-w-0 flex-1 truncate">{workspace.name}</span>
-                        <span className="shrink-0 font-mono text-[10px] text-faint">
+                        <span className="shrink-0 font-mono text-xs text-faint opacity-70">
                           {workspace.tabs.length} 标签
                         </span>
                       </button>
@@ -307,10 +314,10 @@ function NavigationBar({ activeTab, address, onAddress, onSubmit, addressRef, su
                 <>
                   {keywordLabel ? (
                     <div className="flex items-center justify-between border-b border-border/60 px-2 py-1.5">
-                      <span className="font-mono text-[10px] tracking-widest text-faint uppercase">
+                      <span className="font-mono text-xs tracking-widest text-faint opacity-80 uppercase">
                         {keywordLabel}搜索
                       </span>
-                      <span className="font-mono text-[10px] text-faint">
+                      <span className="font-mono text-xs text-faint opacity-70">
                         清空关键字退出
                       </span>
                     </div>

@@ -65,6 +65,7 @@ const EMPTY_SNAPSHOT: AppSnapshot = {
     },
     workspaces: [],
     activeWorkspaceId: null,
+    sessionSnapshots: [],
   },
   locked: false,
   firstRun: true,
@@ -498,15 +499,16 @@ function App() {
                   void runSnapshot(() => api.createWorkspace(name))
                 }
                 onRenameWorkspace={(workspaceId, name) =>
-                  void runSnapshot(() =>
-                    api.renameWorkspace(workspaceId, name),
-                  )
+                  void runSnapshot(() => api.renameWorkspace(workspaceId, name))
                 }
                 onRemoveWorkspace={(workspaceId) =>
                   void runSnapshot(() => api.removeWorkspace(workspaceId))
                 }
                 onSwitchWorkspace={(workspaceId) =>
                   void runSnapshot(() => api.switchWorkspace(workspaceId))
+                }
+                onSaveSnapshot={(name) =>
+                  void runSnapshot(() => api.saveSessionSnapshot(name))
                 }
                 onOverlayOpenChange={setTabStripOverlayOpen}
               />
@@ -515,6 +517,7 @@ function App() {
                 tabs={snapshot.data.tabs}
                 recentlyClosed={snapshot.data.recentlyClosed}
                 workspaces={otherWorkspaces}
+                sessionSnapshots={snapshot.data.sessionSnapshots ?? []}
                 bookmarks={snapshot.data.bookmarks}
                 history={snapshot.data.history}
                 activeTabId={snapshot.data.activeTabId}
@@ -524,6 +527,11 @@ function App() {
                 }
                 onSwitchWorkspace={(workspaceId) =>
                   void runSnapshot(() => api.switchWorkspace(workspaceId))
+                }
+                onRestoreSnapshot={(snapshotId) =>
+                  void runSnapshot(() =>
+                    api.restoreSessionSnapshot(snapshotId, false),
+                  )
                 }
                 onOpenUrl={(url) => createTab(url)}
                 onOpenChange={setTabStripOverlayOpen}
@@ -539,9 +547,7 @@ function App() {
                 keywordSource={addressKeyword.source}
                 workspaces={otherWorkspaces}
                 onOpenUrl={(url) => createTab(url)}
-                onCloseTab={(id) =>
-                  void runSnapshot(() => api.removeTab(id))
-                }
+                onCloseTab={(id) => void runSnapshot(() => api.removeTab(id))}
                 onMoveTabToWorkspace={(tabId, workspaceId) =>
                   void runSnapshot(() =>
                     api.moveTabToWorkspace(tabId, workspaceId),
@@ -673,6 +679,22 @@ function App() {
                         )
                       }
                       onSelectTab={selectTabById}
+                      onSaveSnapshot={(name) =>
+                        void runSnapshot(() => api.saveSessionSnapshot(name))
+                      }
+                      onRestoreSnapshot={(snapshotId, asNewWorkspace) =>
+                        void runSnapshot(() =>
+                          api.restoreSessionSnapshot(
+                            snapshotId,
+                            asNewWorkspace,
+                          ),
+                        )
+                      }
+                      onDeleteSnapshot={(snapshotId) =>
+                        void runSnapshot(() =>
+                          api.deleteSessionSnapshot(snapshotId),
+                        )
+                      }
                     />
                   ) : section === "settings" ? (
                     <SettingsPage

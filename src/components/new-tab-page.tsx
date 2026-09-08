@@ -62,8 +62,8 @@ function NewTabPage({
         aria-hidden
         className="pointer-events-none absolute inset-0"
       >
-        <div className="absolute -top-28 left-[-18vw] size-[34rem] animate-aurora-a rounded-full bg-primary/8 blur-3xl" />
-        <div className="absolute -right-[18vw] -bottom-36 size-[30rem] animate-aurora-b rounded-full bg-accent2/8 blur-3xl" />
+        <div className="absolute -top-28 left-[-18vw] size-[34rem] animate-aurora-a rounded-full bg-primary/10 blur-3xl dark:bg-primary/15" />
+        <div className="absolute -right-[18vw] -bottom-36 size-[30rem] animate-aurora-b rounded-full bg-accent2/6 blur-3xl dark:bg-accent2/10" />
       </div>
       <header className="relative mb-7 flex items-center justify-center gap-3.5">
         <img
@@ -128,7 +128,7 @@ function NewTabPage({
                   setDraft({ ...draft, url: event.target.value })
                 }
                 aria-label="快捷站点网址"
-                className="h-6 w-full min-w-0 bg-transparent text-[11px] text-muted-foreground outline-none"
+                className="h-6 w-full min-w-0 bg-transparent text-xs text-muted-foreground opacity-80 outline-none"
               />
               <span className="flex justify-end gap-0.5">
                 <button

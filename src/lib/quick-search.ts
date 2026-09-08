@@ -1,10 +1,17 @@
-import type { Bookmark, HistoryEntry, TabRecord, Workspace } from "../types";
+import type {
+  Bookmark,
+  HistoryEntry,
+  SessionSnapshot,
+  TabRecord,
+  Workspace,
+} from "../types";
 import { matchesTextQuery } from "./text-search";
 
 export type QuickSearchGroupKey =
   | "tab"
   | "closed"
   | "workspace"
+  | "snapshot"
   | "bookmark"
   | "history";
 
@@ -15,6 +22,7 @@ export type QuickSearchItem = {
   url?: string;
   tabId?: string;
   workspaceId?: string;
+  snapshotId?: string;
   hibernated?: boolean;
 };
 
@@ -23,26 +31,24 @@ export type QuickSearchGroup = {
   items: QuickSearchItem[];
 };
 
-export type QuickSearchSource =
-  | "tab"
-  | "bookmark"
-  | "history"
-  | null;
+export type QuickSearchSource = "tab" | "bookmark" | "history" | null;
 
 const GROUP_ORDER: QuickSearchGroupKey[] = [
   "tab",
   "closed",
   "workspace",
+  "snapshot",
   "bookmark",
   "history",
 ];
 
 const CLOSED_LIMIT = 8;
 const CLOSED_RECENT_LIMIT = 5;
+const SNAPSHOT_LIMIT = 8;
 const BOOKMARK_LIMIT = 6;
 const HISTORY_LIMIT = 8;
 
-/** 地址栏动作关键字 → 检索源（t 标签 / b 书签 / h 历史）。 */
+/** 地址栏动作关键字 → 检索源（t 标签 / b 书签 / h 历史）。快照作为整组会话在 Command Palette 与标签页管理中呈现。 */
 const KEYWORD_SOURCES: Record<string, Exclude<QuickSearchSource, null>> = {
   t: "tab",
   b: "bookmark",
@@ -98,6 +104,7 @@ export function quickSearch({
   tabs,
   recentlyClosed,
   workspaces,
+  sessionSnapshots = [],
   bookmarks,
   history,
 }: {
@@ -106,21 +113,26 @@ export function quickSearch({
   tabs: TabRecord[];
   recentlyClosed: TabRecord[];
   workspaces: Workspace[];
+  sessionSnapshots?: SessionSnapshot[];
   bookmarks: Bookmark[];
   history: HistoryEntry[];
 }): QuickSearchGroup[] {
   const term = query.trim();
   const emptyQuery = !term;
-  const activeGroups = emptyQuery && !filter
-    ? (["tab", "closed", "workspace"] as const)
-    : GROUP_ORDER.filter((key) => !filter || key === filter);
+  const activeGroups =
+    emptyQuery && !filter
+      ? (["tab", "closed", "workspace", "snapshot"] as const)
+      : GROUP_ORDER.filter((key) => !filter || key === filter);
 
   const groups: QuickSearchGroup[] = [];
   for (const key of activeGroups) {
     if (key === "tab") {
       const items = tabs
         .filter((tab) => matchesTextQuery(term, tab.title, tab.url))
-        .sort((left, right) => timestamp(right.lastActiveAt) - timestamp(left.lastActiveAt))
+        .sort(
+          (left, right) =>
+            timestamp(right.lastActiveAt) - timestamp(left.lastActiveAt),
+        )
         .map((tab) => ({
           key: `tab:${tab.id}`,
           group: key,
@@ -162,9 +174,29 @@ export function quickSearch({
       continue;
     }
 
+    if (key === "snapshot") {
+      const items = sessionSnapshots
+        .filter((s) => {
+          if (!term) return true;
+          if (matchesTextQuery(term, s.name)) return true;
+          return s.tabs.some((t) => matchesTextQuery(term, t.title, t.url));
+        })
+        .slice(0, SNAPSHOT_LIMIT)
+        .map((s) => ({
+          key: `snapshot:${s.id}`,
+          group: key,
+          title: `${s.name} (${s.tabs.length}个标签)`,
+          snapshotId: s.id,
+        }));
+      groups.push({ key, items });
+      continue;
+    }
+
     if (key === "bookmark") {
       const items = bookmarks
-        .filter((bookmark) => matchesTextQuery(term, bookmark.title, bookmark.url))
+        .filter((bookmark) =>
+          matchesTextQuery(term, bookmark.title, bookmark.url),
+        )
         .slice(0, BOOKMARK_LIMIT)
         .map((bookmark) => ({
           key: `bookmark:${bookmark.id}`,
@@ -180,7 +212,9 @@ export function quickSearch({
     const items: QuickSearchItem[] = [];
     for (const entry of history
       .filter((item) => matchesTextQuery(term, item.title, item.url))
-      .sort((left, right) => timestamp(right.visitedAt) - timestamp(left.visitedAt))) {
+      .sort(
+        (left, right) => timestamp(right.visitedAt) - timestamp(left.visitedAt),
+      )) {
       const urlKey = normalizedUrlKey(entry.url);
       if (seen.has(urlKey)) continue;
       seen.add(urlKey);

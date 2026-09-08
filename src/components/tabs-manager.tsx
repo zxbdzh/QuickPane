@@ -1,11 +1,14 @@
 import {
+  Camera,
   Check as CheckIcon,
   FolderInput,
   Globe2,
   Layers,
   Moon,
+  RotateCcw,
   Search,
   Star,
+  Trash2,
   VolumeX,
   X,
 } from "lucide-react";
@@ -71,6 +74,9 @@ function TabsManagerPage({
   workspaces,
   onBatch,
   onSelectTab,
+  onSaveSnapshot,
+  onRestoreSnapshot,
+  onDeleteSnapshot,
 }: {
   snapshot: AppSnapshot;
   /** 「移入工作区」目标：调用方传入当前工作区之外的选项。 */
@@ -81,12 +87,19 @@ function TabsManagerPage({
     workspaceId?: string,
   ) => void;
   onSelectTab: (tabId: string) => void;
+  onSaveSnapshot: (name: string) => void;
+  onRestoreSnapshot: (snapshotId: string, asNewWorkspace: boolean) => void;
+  onDeleteSnapshot: (snapshotId: string) => void;
 }) {
+  const [activeView, setActiveView] = useState<"tabs" | "snapshots">("tabs");
+  const [snapshotName, setSnapshotName] = useState("");
+  const [savingSnapshot, setSavingSnapshot] = useState(false);
   const [query, setQuery] = useState("");
   const [domain, setDomain] = useState<string | null>(null);
   const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
   const [confirmClose, setConfirmClose] = useState(false);
   const tabs = snapshot.data.tabs;
+  const snapshots = snapshot.data.sessionSnapshots ?? [];
 
   const domains = useMemo(() => {
     const counts = new Map<string, number>();
@@ -138,157 +151,311 @@ function TabsManagerPage({
     setSelectedIds(new Set());
   };
 
+  const handleSaveSnapshot = () => {
+    const trimmed = snapshotName.trim();
+    if (!trimmed) return;
+    onSaveSnapshot(trimmed);
+    setSnapshotName("");
+    setSavingSnapshot(false);
+  };
+
   return (
     <div className="mx-auto w-full max-w-[880px] px-6 pt-7 pb-16">
-      <header className="flex items-end justify-between gap-4 pb-4">
+      <header className="flex flex-wrap items-end justify-between gap-4 pb-4">
         <div>
           <h1 className="text-xl font-semibold">标签管理</h1>
           <p className="mt-0.5 text-xs text-muted-foreground">
-            <span className="font-mono">{tabs.length}</span> 个标签
+            <span className="font-mono">{tabs.length}</span> 个标签 ·{" "}
+            <span className="font-mono">{snapshots.length}</span> 个会话快照
           </p>
         </div>
-      </header>
-
-      <label className="relative block pb-3">
-        <Search className="pointer-events-none absolute top-1/2 left-3 size-3.5 -translate-y-1/2 text-muted-foreground" />
-        <Input
-          value={query}
-          onChange={(event) => setQuery(event.target.value)}
-          placeholder="搜索标题或网址"
-          aria-label="搜索标签"
-          className="h-8 pl-8 text-xs"
-        />
-      </label>
-
-      {domains.length ? (
-        <div className="flex flex-wrap items-center gap-1 pb-3">
-          {[null, ...domains].map((host) => (
+        <div className="flex items-center gap-2">
+          <div className="flex rounded-md border bg-muted/30 p-0.5">
             <button
-              key={host ?? "all"}
               type="button"
-              onClick={() => setDomain(host)}
+              onClick={() => setActiveView("tabs")}
               className={cn(
-                "rounded-full border px-2 py-0.5 font-mono text-[11px] transition-colors",
-                domain === host
-                  ? "border-primary/40 bg-primary/10 text-primary"
-                  : "border-border text-muted-foreground hover:border-foreground/20 hover:text-foreground",
+                "rounded px-2.5 py-1 text-xs transition-colors",
+                activeView === "tabs"
+                  ? "bg-surface font-medium text-foreground shadow-xs"
+                  : "text-muted-foreground hover:text-foreground",
               )}
             >
-              {host ?? "全部"}
+              当前标签
             </button>
-          ))}
-        </div>
-      ) : null}
-
-      {filtered.length === 0 ? (
-        <div className="flex flex-col items-center justify-center gap-3 rounded-lg border border-dashed py-20 text-center">
-          <span className="grid size-12 place-items-center rounded-md bg-soft text-on-soft [&_svg]:size-5">
-            <Layers />
-          </span>
-          <div>
-            <p className="text-sm font-medium">
-              {tabs.length ? "没有匹配的标签" : "当前工作区还没有标签"}
-            </p>
-            <p className="mt-1 text-xs text-muted-foreground">
-              {tabs.length
-                ? "换个关键词或域名筛选试试。"
-                : "打开几个网页后，可以在这里批量管理它们。"}
-            </p>
+            <button
+              type="button"
+              onClick={() => setActiveView("snapshots")}
+              className={cn(
+                "rounded px-2.5 py-1 text-xs transition-colors",
+                activeView === "snapshots"
+                  ? "bg-surface font-medium text-foreground shadow-xs"
+                  : "text-muted-foreground hover:text-foreground",
+              )}
+            >
+              会话快照 ({snapshots.length})
+            </button>
           </div>
-        </div>
-      ) : (
-        <div className="overflow-hidden rounded-lg border bg-surface">
-          {selected.length > 0 ? (
-            <div className="sticky top-0 z-10 flex flex-wrap items-center gap-1.5 border-b bg-popover/95 px-3 py-2 backdrop-blur-sm">
-              <span className="mr-1 font-mono text-xs text-primary">
-                已选 {selected.length}
-              </span>
-              <Button
-                variant="secondary"
-                size="sm"
-                onClick={() => runBatch("bookmark")}
-              >
-                <Star className="size-3.5" />
-                收藏
-              </Button>
-              <Button
-                variant="secondary"
-                size="sm"
-                onClick={() => runBatch(hasUnmuted ? "mute" : "unmute")}
-              >
-                <VolumeX className="size-3.5" />
-                {hasUnmuted ? "静音" : "取消静音"}
-              </Button>
-              <Select
-                onValueChange={(workspaceId) =>
-                  runBatch("move", workspaceId)
-                }
-              >
-                <SelectTrigger size="sm" className="w-auto gap-1.5">
-                  <FolderInput className="size-3.5" />
-                  移入工作区
-                </SelectTrigger>
-                <SelectContent>
-                  {workspaces.length ? (
-                    workspaces.map((workspace) => (
-                      <SelectItem key={workspace.id} value={workspace.id}>
-                        {workspace.name}
-                      </SelectItem>
-                    ))
-                  ) : (
-                    <div className="px-2 py-1.5 text-xs text-muted-foreground">
-                      没有其它工作区
-                    </div>
-                  )}
-                </SelectContent>
-              </Select>
-              <Button
-                variant="destructive"
-                size="sm"
-                onClick={() => setConfirmClose(true)}
-              >
-                <X className="size-3.5" />
-                关闭
+          {savingSnapshot ? (
+            <div className="flex items-center gap-1.5">
+              <Input
+                value={snapshotName}
+                onChange={(e) => setSnapshotName(e.target.value)}
+                onKeyDown={(e) => {
+                  if (e.key === "Enter") handleSaveSnapshot();
+                  else if (e.key === "Escape") setSavingSnapshot(false);
+                }}
+                placeholder="快照名称…"
+                className="h-8 w-44 text-xs"
+                autoFocus
+              />
+              <Button size="sm" onClick={handleSaveSnapshot}>
+                保存
               </Button>
               <Button
                 variant="ghost"
                 size="sm"
-                className="ml-auto"
-                onClick={() => setSelectedIds(new Set())}
+                onClick={() => setSavingSnapshot(false)}
               >
-                取消选择
+                取消
               </Button>
+            </div>
+          ) : (
+            <Button
+              variant="secondary"
+              size="sm"
+              onClick={() => {
+                const defaultName = tabs[0]?.title
+                  ? `会话-${tabs[0].title.slice(0, 10)}`
+                  : `会话-${new Date().toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })}`;
+                setSnapshotName(defaultName);
+                setSavingSnapshot(true);
+              }}
+            >
+              <Camera className="size-3.5" />
+              存为快照
+            </Button>
+          )}
+        </div>
+      </header>
+
+      {activeView === "snapshots" ? (
+        snapshots.length === 0 ? (
+          <div className="flex flex-col items-center justify-center gap-3 rounded-lg border border-dashed py-20 text-center">
+            <span className="grid size-12 place-items-center rounded-md bg-soft text-on-soft [&_svg]:size-5">
+              <Camera />
+            </span>
+            <div>
+              <p className="text-sm font-medium">还没有保存的会话快照</p>
+              <p className="mt-1 text-xs text-muted-foreground">
+                点击右上角「存为快照」，可以随时封存当前标签组供以后一键恢复。
+              </p>
+            </div>
+          </div>
+        ) : (
+          <div className="space-y-3">
+            {snapshots.map((snapshotItem) => (
+              <div
+                key={snapshotItem.id}
+                className="flex flex-col gap-2 rounded-lg border bg-surface p-3.5 transition-colors"
+              >
+                <div className="flex items-center justify-between gap-2">
+                  <div className="flex items-center gap-2">
+                    <Camera className="size-4 text-primary" />
+                    <span className="font-medium text-sm">{snapshotItem.name}</span>
+                    <span className="font-mono text-xs text-faint">
+                      {snapshotItem.tabs.length} 标签
+                    </span>
+                  </div>
+                  <div className="flex items-center gap-1.5">
+                    <Button
+                      variant="secondary"
+                      size="sm"
+                      onClick={() => onRestoreSnapshot(snapshotItem.id, false)}
+                    >
+                      <RotateCcw className="size-3.5" />
+                      就地恢复
+                    </Button>
+                    <Button
+                      variant="secondary"
+                      size="sm"
+                      onClick={() => onRestoreSnapshot(snapshotItem.id, true)}
+                    >
+                      新工作区恢复
+                    </Button>
+                    <Button
+                      variant="ghost"
+                      size="sm"
+                      className="text-destructive hover:text-destructive"
+                      onClick={() => onDeleteSnapshot(snapshotItem.id)}
+                    >
+                      <Trash2 className="size-3.5" />
+                    </Button>
+                  </div>
+                </div>
+                <div className="flex flex-wrap gap-1.5 pt-1">
+                  {snapshotItem.tabs.slice(0, 6).map((t, idx) => (
+                    <span
+                      key={idx}
+                      className="max-w-44 truncate rounded border bg-muted/40 px-1.5 py-0.5 font-mono text-xs text-muted-foreground opacity-90"
+                    >
+                      {t.title || t.url}
+                    </span>
+                  ))}
+                  {snapshotItem.tabs.length > 6 ? (
+                    <span className="rounded border bg-muted/40 px-1.5 py-0.5 font-mono text-xs text-faint opacity-70">
+                      +{snapshotItem.tabs.length - 6}
+                    </span>
+                  ) : null}
+                </div>
+              </div>
+            ))}
+          </div>
+        )
+      ) : (
+        <>
+          <label className="relative block pb-3">
+            <Search className="pointer-events-none absolute top-1/2 left-3 size-3.5 -translate-y-1/2 text-muted-foreground" />
+            <Input
+              value={query}
+              onChange={(event) => setQuery(event.target.value)}
+              placeholder="搜索标题或网址"
+              aria-label="搜索标签"
+              className="h-8 pl-8 text-xs"
+            />
+          </label>
+
+          {domains.length ? (
+            <div className="flex flex-wrap items-center gap-1 pb-3">
+              {[null, ...domains].map((host) => (
+                <button
+                  key={host ?? "all"}
+                  type="button"
+                  onClick={() => setDomain(host)}
+                  className={cn(
+                    "rounded-full border px-2 py-0.5 font-mono text-xs transition-colors",
+                    domain === host
+                      ? "border-primary/40 bg-primary/10 text-primary"
+                      : "border-border text-muted-foreground hover:border-foreground/20 hover:text-foreground",
+                  )}
+                >
+                  {host ?? "全部"}
+                </button>
+              ))}
             </div>
           ) : null}
 
-          <div className="grid grid-cols-[28px_24px_minmax(0,1fr)_auto] items-center gap-3 border-b border-border/70 bg-muted/40 px-3 py-1.5">
-            <Check
-              checked={allSelected}
-              label="全选"
-              onChange={toggleAll}
-            />
-            <span className="font-mono text-[10px] tracking-widest text-faint uppercase">
-              标签
-            </span>
-            <span className="font-mono text-[10px] tracking-widest text-faint uppercase">
-              网址
-            </span>
-            <span className="font-mono text-[10px] tracking-widest text-faint uppercase">
-              状态
-            </span>
-          </div>
+          {filtered.length === 0 ? (
+            <div className="flex flex-col items-center justify-center gap-3 rounded-lg border border-dashed py-20 text-center">
+              <span className="grid size-12 place-items-center rounded-md bg-soft text-on-soft [&_svg]:size-5">
+                <Layers />
+              </span>
+              <div>
+                <p className="text-sm font-medium">
+                  {tabs.length ? "没有匹配的标签" : "当前工作区还没有标签"}
+                </p>
+                <p className="mt-1 text-xs text-muted-foreground">
+                  {tabs.length
+                    ? "换个关键词或域名筛选试试。"
+                    : "打开几个网页后，可以在这里批量管理它们。"}
+                </p>
+              </div>
+            </div>
+          ) : (
+            <div className="overflow-hidden rounded-lg border bg-surface">
+              {selected.length > 0 ? (
+                <div className="sticky top-0 z-10 flex flex-wrap items-center gap-1.5 border-b bg-popover/95 px-3 py-2 backdrop-blur-sm">
+                  <span className="mr-1 font-mono text-xs text-primary">
+                    已选 {selected.length}
+                  </span>
+                  <Button
+                    variant="secondary"
+                    size="sm"
+                    onClick={() => runBatch("bookmark")}
+                  >
+                    <Star className="size-3.5" />
+                    收藏
+                  </Button>
+                  <Button
+                    variant="secondary"
+                    size="sm"
+                    onClick={() => runBatch(hasUnmuted ? "mute" : "unmute")}
+                  >
+                    <VolumeX className="size-3.5" />
+                    {hasUnmuted ? "静音" : "取消静音"}
+                  </Button>
+                  <Select
+                    onValueChange={(workspaceId) =>
+                      runBatch("move", workspaceId)
+                    }
+                  >
+                    <SelectTrigger size="sm" className="w-auto gap-1.5">
+                      <FolderInput className="size-3.5" />
+                      移入工作区
+                    </SelectTrigger>
+                    <SelectContent>
+                      {workspaces.length ? (
+                        workspaces.map((workspace) => (
+                          <SelectItem key={workspace.id} value={workspace.id}>
+                            {workspace.name}
+                          </SelectItem>
+                        ))
+                      ) : (
+                        <div className="px-2 py-1.5 text-xs text-muted-foreground">
+                          没有其它工作区
+                        </div>
+                      )}
+                    </SelectContent>
+                  </Select>
+                  <Button
+                    variant="destructive"
+                    size="sm"
+                    onClick={() => setConfirmClose(true)}
+                  >
+                    <X className="size-3.5" />
+                    关闭
+                  </Button>
+                  <Button
+                    variant="ghost"
+                    size="sm"
+                    className="ml-auto"
+                    onClick={() => setSelectedIds(new Set())}
+                  >
+                    取消选择
+                  </Button>
+                </div>
+              ) : null}
 
-          {filtered.map((tab) => (
-            <TabRow
-              key={tab.id}
-              tab={tab}
-              active={tab.id === snapshot.data.activeTabId}
-              checked={selectedIds.has(tab.id)}
-              onToggle={() => toggle(tab.id)}
-              onSelect={() => onSelectTab(tab.id)}
-            />
-          ))}
-        </div>
+              <div className="grid grid-cols-[28px_24px_minmax(0,1fr)_auto] items-center gap-3 border-b border-border/70 bg-muted/40 px-3 py-1.5">
+                <Check
+                  checked={allSelected}
+                  label="全选"
+                  onChange={toggleAll}
+                />
+                <span className="font-mono text-xs tracking-widest text-faint opacity-80 uppercase">
+                  标签
+                </span>
+                <span className="font-mono text-xs tracking-widest text-faint opacity-80 uppercase">
+                  网址
+                </span>
+                <span className="font-mono text-xs tracking-widest text-faint opacity-80 uppercase">
+                  状态
+                </span>
+              </div>
+
+              {filtered.map((tab) => (
+                <TabRow
+                  key={tab.id}
+                  tab={tab}
+                  active={tab.id === snapshot.data.activeTabId}
+                  checked={selectedIds.has(tab.id)}
+                  onToggle={() => toggle(tab.id)}
+                  onSelect={() => onSelectTab(tab.id)}
+                />
+              ))}
+            </div>
+          )}
+        </>
       )}
 
       <AlertDialog
@@ -366,7 +533,7 @@ function TabRow({
         <p className="flex items-center gap-1.5 truncate text-sm font-medium">
           <span className="truncate">{tab.title || "新标签页"}</span>
           {active ? (
-            <span className="shrink-0 font-mono text-[10px] text-accent2">
+            <span className="shrink-0 font-mono text-xs text-accent2 opacity-90">
               当前
             </span>
           ) : null}
@@ -377,15 +544,15 @@ function TabRow({
       </div>
       <div className="flex items-center gap-1.5">
         {tab.pinned ? (
-          <span className="font-mono text-[10px] text-faint">固定</span>
+          <span className="font-mono text-xs text-faint opacity-70">固定</span>
         ) : null}
         {tab.muted ? (
-          <span className="font-mono text-[10px] text-primary">静音</span>
+          <span className="font-mono text-xs text-primary opacity-80">静音</span>
         ) : null}
         {tab.hibernated ? (
-          <span className="font-mono text-[10px] text-faint">休眠</span>
+          <span className="font-mono text-xs text-faint opacity-70">休眠</span>
         ) : null}
-        <span className="max-w-24 truncate font-mono text-[10px] text-faint">
+        <span className="max-w-24 truncate font-mono text-xs text-faint opacity-70">
           {hostOf(tab.url)}
         </span>
       </div>

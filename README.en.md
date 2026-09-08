@@ -92,10 +92,11 @@ The global show/hide shortcut is configurable in Settings. It must include at le
 
 ### Quick Switch and Workspaces
 
-- Search current tabs, recently closed tabs, workspaces, bookmarks and history in one quick switch panel.
+- Search current tabs, recently closed tabs, workspaces, session snapshots, bookmarks and history in one quick switch panel.
 - Search Chinese titles by pinyin, move through results with the keyboard and press Enter to open an item.
 - Use `t` for tabs, `b` for bookmarks and `h` for history in the address bar; tab results can be copied, closed or moved to another workspace.
 - Create, rename, switch and delete persistent workspaces.
+- Save named session snapshots from the workspace menu or tab manager, then search and restore them in place or into a new workspace.
 - Filter tabs by title, URL or domain, then bookmark, mute, move or close them in batches.
 
 ### Appears when needed
@@ -108,7 +109,7 @@ The global show/hide shortcut is configurable in Settings. It must include at le
 ### Persistent browsing sessions
 
 - Multiple tabs in one window
-- Persistent tabs, history, bookmarks, recently closed pages and workspaces
+- Persistent tabs, history, bookmarks, recently closed pages, workspaces and session snapshots
 - URL navigation, search and tab / bookmark / history source search from the address bar
 - Regular web links and new-tab links inside the same browser session
 - Downloads, page zoom and background tab hibernation

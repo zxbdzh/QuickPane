@@ -47,11 +47,12 @@ const DEFAULT_SETTINGS: Settings = {
 const DOWNLOADS: DownloadRecord[] = [];
 
 function makeTab(url = "quickpane://newtab", title?: string): TabRecord {
-  const finalUrl =
-    url === "quickpane://newtab" ? url : normalizeInput(url);
+  const finalUrl = url === "quickpane://newtab" ? url : normalizeInput(url);
   return {
     id: `tab-${Math.random().toString(36).slice(2, 8)}`,
-    title: title ?? (finalUrl === "quickpane://newtab" ? "新标签页" : titleFromUrl(finalUrl)),
+    title:
+      title ??
+      (finalUrl === "quickpane://newtab" ? "新标签页" : titleFromUrl(finalUrl)),
     url: finalUrl,
     pinned: false,
     loading: false,
@@ -146,6 +147,21 @@ function makeSnapshot(): AppSnapshot {
         },
       ],
       activeWorkspaceId: "ws-default",
+      sessionSnapshots: [
+        {
+          id: "snap-sample",
+          name: "参考文档",
+          createdAt: new Date().toISOString(),
+          activeIndex: 0,
+          tabs: [
+            {
+              url: "https://doc.rust-lang.org",
+              title: "Rust 文档",
+              pinned: false,
+            },
+          ],
+        },
+      ],
     },
     locked: bootLocked,
     firstRun: false,
@@ -339,6 +355,91 @@ async function invoke(
       emitSnapshot();
       return structuredClone(snapshot);
     }
+    case "save_session_snapshot": {
+      const name = ((args.name as string) || "").trim();
+      if (!name) throw new Error("快照名称不能为空");
+      const activeIndex = Math.max(
+        0,
+        snapshot.data.tabs.findIndex(
+          (tab) => tab.id === snapshot.data.activeTabId,
+        ),
+      );
+      const record = {
+        id: `snap-${Math.random().toString(36).slice(2, 8)}`,
+        name,
+        createdAt: new Date().toISOString(),
+        activeIndex,
+        tabs: snapshot.data.tabs.map((tab) => ({
+          url: tab.url,
+          title: tab.title,
+          pinned: tab.pinned,
+        })),
+      };
+      snapshot.data.sessionSnapshots = [
+        record,
+        ...(snapshot.data.sessionSnapshots ?? []),
+      ];
+      emitSnapshot();
+      return structuredClone(snapshot);
+    }
+    case "delete_session_snapshot": {
+      const id = args.snapshotId as string;
+      snapshot.data.sessionSnapshots = (
+        snapshot.data.sessionSnapshots ?? []
+      ).filter((item) => item.id !== id);
+      emitSnapshot();
+      return structuredClone(snapshot);
+    }
+    case "rename_session_snapshot": {
+      const id = args.snapshotId as string;
+      const name = ((args.name as string) || "").trim();
+      if (!name) throw new Error("快照名称不能为空");
+      const target = (snapshot.data.sessionSnapshots ?? []).find(
+        (item) => item.id === id,
+      );
+      if (!target) throw new Error("未找到指定会话快照");
+      target.name = name;
+      emitSnapshot();
+      return structuredClone(snapshot);
+    }
+    case "restore_session_snapshot": {
+      const id = args.snapshotId as string;
+      const asNewWorkspace = Boolean(args.asNewWorkspace);
+      const target = (snapshot.data.sessionSnapshots ?? []).find(
+        (item) => item.id === id,
+      );
+      if (!target) throw new Error("未找到指定会话快照");
+      const restoredTabs = target.tabs.length
+        ? target.tabs.map((t) => ({
+            ...makeTab(t.url),
+            title: t.title,
+            pinned: t.pinned,
+          }))
+        : [makeTab()];
+      const activeIndex = Math.min(target.activeIndex, restoredTabs.length - 1);
+      const targetActiveId =
+        restoredTabs[activeIndex]?.id ?? restoredTabs[0].id;
+
+      if (asNewWorkspace) {
+        stashCurrentTabs();
+        const workspace = {
+          id: `ws-${Math.random().toString(36).slice(2, 8)}`,
+          name: target.name,
+          tabs: restoredTabs,
+          activeTabId: targetActiveId,
+        };
+        snapshot.data.workspaces.push(workspace);
+        snapshot.data.tabs = structuredClone(restoredTabs);
+        snapshot.data.activeTabId = targetActiveId;
+        snapshot.data.activeWorkspaceId = workspace.id;
+      } else {
+        snapshot.data.recentlyClosed.unshift(...snapshot.data.tabs);
+        snapshot.data.tabs = structuredClone(restoredTabs);
+        snapshot.data.activeTabId = targetActiveId;
+      }
+      emitSnapshot();
+      return structuredClone(snapshot);
+    }
     case "move_tab_to_workspace": {
       const tabId = args.tabId as string;
       const workspaceId = args.workspaceId as string;
@@ -382,8 +483,7 @@ async function invoke(
           ...closed,
           ...snapshot.data.recentlyClosed,
         ].slice(0, 20);
-        if (snapshot.data.tabs.length === 0)
-          snapshot.data.tabs.push(makeTab());
+        if (snapshot.data.tabs.length === 0) snapshot.data.tabs.push(makeTab());
         if (
           !snapshot.data.tabs.some(
             (tab) => tab.id === snapshot.data.activeTabId,
@@ -422,8 +522,7 @@ async function invoke(
           tab.loaded = false;
           target.tabs.push(tab);
         }
-        if (snapshot.data.tabs.length === 0)
-          snapshot.data.tabs.push(makeTab());
+        if (snapshot.data.tabs.length === 0) snapshot.data.tabs.push(makeTab());
         if (
           !snapshot.data.tabs.some(
             (tab) => tab.id === snapshot.data.activeTabId,

@@ -353,7 +353,7 @@ pub(crate) fn batch_mute_data(runtime: &mut RuntimeData, tab_ids: &[String], mut
     }
 }
 
-fn close_all_tab_webviews(app: &AppHandle) {
+pub(crate) fn close_all_tab_webviews(app: &AppHandle) {
     let labels: Vec<String> = app
         .webviews()
         .keys()
@@ -368,7 +368,7 @@ fn close_all_tab_webviews(app: &AppHandle) {
 }
 
 /// 装载完成后的收尾：按激活标签恢复 WebView（新标签页则先扩幅）。
-fn restore_active_tab_webview(app: &AppHandle) {
+pub(crate) fn restore_active_tab_webview(app: &AppHandle) {
     let state = app.state::<AppState>();
     let active = state
         .inner

@@ -1,5 +1,6 @@
 mod browser;
 mod extensions;
+mod session_snapshot;
 mod state;
 mod windowing;
 mod workspace;
@@ -132,6 +133,41 @@ async fn apply_tab_batch(
 ) -> Result<AppSnapshot, String> {
     require_unlocked(&app)?;
     workspace::apply_tab_batch(&app, &update)
+}
+
+#[tauri::command]
+async fn save_session_snapshot(app: AppHandle, name: String) -> Result<AppSnapshot, String> {
+    require_unlocked(&app)?;
+    session_snapshot::save_session_snapshot(&app, &name)
+}
+
+#[tauri::command]
+async fn delete_session_snapshot(
+    app: AppHandle,
+    snapshot_id: String,
+) -> Result<AppSnapshot, String> {
+    require_unlocked(&app)?;
+    session_snapshot::delete_session_snapshot(&app, &snapshot_id)
+}
+
+#[tauri::command]
+async fn rename_session_snapshot(
+    app: AppHandle,
+    snapshot_id: String,
+    name: String,
+) -> Result<AppSnapshot, String> {
+    require_unlocked(&app)?;
+    session_snapshot::rename_session_snapshot(&app, &snapshot_id, &name)
+}
+
+#[tauri::command]
+async fn restore_session_snapshot(
+    app: AppHandle,
+    snapshot_id: String,
+    as_new_workspace: bool,
+) -> Result<AppSnapshot, String> {
+    require_unlocked(&app)?;
+    session_snapshot::restore_session_snapshot(&app, &snapshot_id, as_new_workspace)
 }
 
 #[tauri::command]
@@ -1072,6 +1108,10 @@ fn register_commands(builder: tauri::Builder<tauri::Wry>) -> tauri::Builder<taur
         switch_workspace,
         move_tab_to_workspace,
         apply_tab_batch,
+        save_session_snapshot,
+        delete_session_snapshot,
+        rename_session_snapshot,
+        restore_session_snapshot,
         set_tab_muted,
         navigate,
         reload,

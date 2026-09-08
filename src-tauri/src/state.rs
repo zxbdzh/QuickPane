@@ -117,6 +117,42 @@ impl WorkspaceRecord {
     }
 }
 
+/// 具名会话快照中保存的标签原子数据（剥离加载/静音/休眠等运行时状态）。
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct SessionSnapshotTab {
+    pub url: String,
+    pub title: String,
+    pub pinned: bool,
+}
+
+/// 具名会话快照：保存某一时刻整组标签页与激活状态。
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct SessionSnapshotRecord {
+    pub id: String,
+    pub name: String,
+    pub created_at: DateTime<Utc>,
+    pub tabs: Vec<SessionSnapshotTab>,
+    pub active_index: usize,
+}
+
+impl SessionSnapshotRecord {
+    pub fn new(
+        name: impl Into<String>,
+        tabs: Vec<SessionSnapshotTab>,
+        active_index: usize,
+    ) -> Self {
+        Self {
+            id: Uuid::new_v4().simple().to_string(),
+            name: name.into(),
+            created_at: Utc::now(),
+            tabs,
+            active_index,
+        }
+    }
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(default, rename_all = "camelCase")]
 pub struct Settings {
@@ -179,6 +215,8 @@ pub struct PersistedData {
     /// 全部工作区记录；当前工作区的 tabs 在切换离开时才写回。
     pub workspaces: Vec<WorkspaceRecord>,
     pub active_workspace_id: Option<String>,
+    /// 用户保存的命名会话快照。
+    pub session_snapshots: Vec<SessionSnapshotRecord>,
 }
 
 impl Default for PersistedData {
@@ -195,6 +233,7 @@ impl Default for PersistedData {
             settings: Settings::default(),
             workspaces: vec![workspace.clone()],
             active_workspace_id: Some(workspace.id),
+            session_snapshots: Vec::new(),
         }
     }
 }

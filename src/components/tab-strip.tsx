@@ -10,6 +10,7 @@ import {
   X,
 } from "lucide-react";
 import { AnimatePresence, motion } from "motion/react";
+import { useEffect, useRef } from "react";
 
 import type { TabRecord, Workspace } from "../types";
 import { cn } from "../lib/utils";
@@ -32,6 +33,7 @@ function TabStrip({
   onRenameWorkspace,
   onRemoveWorkspace,
   onSwitchWorkspace,
+  onSaveSnapshot,
   onOverlayOpenChange,
 }: {
   tabs: TabRecord[];
@@ -48,11 +50,21 @@ function TabStrip({
   onRenameWorkspace: (workspaceId: string, name: string) => void;
   onRemoveWorkspace: (workspaceId: string) => void;
   onSwitchWorkspace: (workspaceId: string) => void;
+  onSaveSnapshot: (name: string) => void;
   /** 工作区菜单开合时上报：驱动 main WebView 扩幅，保证下拉盖在网页上。 */
   onOverlayOpenChange: (open: boolean) => void;
 }) {
+  const activeTabRef = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    activeTabRef.current?.scrollIntoView({
+      inline: "nearest",
+      behavior: "smooth",
+    });
+  }, [activeId]);
+
   return (
-    <div className="relative z-50 flex h-8 shrink-0 select-none items-end bg-chrome pr-2 pl-2">
+    <div className="relative z-50 flex h-8 shrink-0 select-none items-end border-b border-border/70 bg-chrome pr-2 pl-2">
       <WorkspaceMenu
         workspaces={workspaces}
         activeWorkspaceId={activeWorkspaceId}
@@ -61,6 +73,7 @@ function TabStrip({
         onRename={onRenameWorkspace}
         onRemove={onRemoveWorkspace}
         onSwitch={onSwitchWorkspace}
+        onSaveSnapshot={onSaveSnapshot}
         onOpenChange={onOverlayOpenChange}
       />
 
@@ -70,6 +83,7 @@ function TabStrip({
             const active = tab.id === activeId;
             return (
               <motion.div
+                ref={active ? activeTabRef : undefined}
                 key={tab.id}
                 tabIndex={0}
                 role="button"

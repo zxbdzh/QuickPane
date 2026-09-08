@@ -19,6 +19,20 @@ export type Workspace = {
   activeTabId: string | null;
 };
 
+export type SessionSnapshotTab = {
+  url: string;
+  title: string;
+  pinned: boolean;
+};
+
+export type SessionSnapshot = {
+  id: string;
+  name: string;
+  createdAt: string;
+  tabs: SessionSnapshotTab[];
+  activeIndex: number;
+};
+
 export type HistoryEntry = {
   id: string;
   title: string;
@@ -90,6 +104,7 @@ export type PersistedData = {
   settings: Settings;
   workspaces: Workspace[];
   activeWorkspaceId: string | null;
+  sessionSnapshots: SessionSnapshot[];
 };
 
 export type AppSnapshot = {
