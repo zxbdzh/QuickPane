@@ -256,6 +256,8 @@ function App() {
   }, [applySnapshot]);
 
   useEffect(() => {
+    // 只有当用户没有在地址栏输入/焦点不在地址栏时，才从 activeTab 同步 url
+    if (document.activeElement === addressRef.current) return;
     setAddress(
       activeTab?.url === "quickpane://newtab" ? "" : (activeTab?.url ?? ""),
     );

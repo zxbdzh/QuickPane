@@ -987,29 +987,6 @@ pub fn resize_tabs(app: &AppHandle) {
 /// 浮层/页面/锁屏需要覆盖内容区时扩回满幅（UI 层在 z 序上方，浮层照常盖住网页）。
 pub fn set_shell_expanded(app: &AppHandle, expanded: bool) -> Result<(), String> {
     let collapsed = !expanded;
-    // 展开（浮层/锁屏/非浏览页）时把键盘焦点交给 chrome；
-    // 收缩回浏览态时交还活动标签，网页可立即接收键盘输入。
-    if let Some(shell) = app.get_webview("main") {
-        if expanded {
-            let _ = shell.set_focus();
-        } else if let Some(active) = app
-            .state::<AppState>()
-            .inner
-            .lock()
-            .ok()
-            .and_then(|runtime| {
-                if tab_content_should_be_visible(&runtime) {
-                    runtime.data.active_tab_id.clone()
-                } else {
-                    None
-                }
-            })
-        {
-            if let Some(webview) = app.get_webview(&tab_label(&active)) {
-                let _ = webview.set_focus();
-            }
-        }
-    }
     let changed = app
         .state::<AppState>()
         .inner
