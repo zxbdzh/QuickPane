@@ -194,7 +194,7 @@ function NavigationBar({ activeTab, address, onAddress, onSubmit, addressRef, su
           : null;
 
   return (
-    <nav className="flex h-[54px] shrink-0 items-center gap-1.5 border-b border-border bg-surface px-2">
+    <nav className="relative z-40 flex h-[54px] shrink-0 items-center gap-1.5 border-b border-border bg-surface px-2">
       <div className="flex select-none items-center gap-0.5">
         <IconButton label="后退" shortcut="Alt+←" onClick={onBack}><ArrowLeft className="size-4" /></IconButton>
         <IconButton label="前进" shortcut="Alt+→" onClick={onForward}><ArrowRight className="size-4" /></IconButton>

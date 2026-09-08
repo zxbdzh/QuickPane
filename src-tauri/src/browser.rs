@@ -632,6 +632,7 @@ pub async fn activate_tab(app: &AppHandle, tab_id: &str) -> Result<AppSnapshot, 
             rollback();
             return Err(error);
         }
+        sink_tab_below_shell(app);
     }
     emit_snapshot(app);
     Ok(state.snapshot())
@@ -721,6 +722,7 @@ pub async fn navigate_tab(
         rollback();
         return Err(error);
     }
+    sink_tab_below_shell(app);
     emit_snapshot(app);
     Ok(state.snapshot())
 }
@@ -851,6 +853,7 @@ pub async fn close_tab(app: &AppHandle, tab_id: &str) -> Result<AppSnapshot, Str
                 );
                 return Err(error);
             }
+            sink_tab_below_shell(app);
         }
     }
     if is_new_tab {
@@ -869,19 +872,23 @@ pub fn hide_all_tabs(app: &AppHandle) {
     }
 }
 
+/// 贴着客户区原点的是 main UI（收缩时也是 0,0）；标签层从 CHROME_HEIGHT 起。
+/// 用原点而不是铺满判断：扩幅后尺寸可能还没刷上，此时壳层仍只有 86px 高。
+fn hwnd_is_shell_layer(left: i32, top: i32) -> bool {
+    left <= 0 && top <= 0
+}
+
 /// 把标签层 WebView 压到主 WebView（React UI 层）之下。
 /// Win32 同级子窗口按创建顺序叠放，后创建的 tab WebView 默认盖在 UI 上；
-/// tauri::Webview 未暴露 HWND，这里枚举主窗口直接子窗口，
-/// bounds 未覆盖完整客户区的（tab 层，高度少 CHROME_HEIGHT）全部压到 z 序最底，
-/// 满幅的 main UI WebView 天然在其上——地址下拉、菜单等浮层原生覆盖网页。
+/// tauri::Webview 未暴露 HWND，这里只处理主窗口直接子窗口：
+/// 贴原点的提到最上，其余压到最底——地址下拉、菜单等浮层才能盖住网页。
 #[cfg(windows)]
 fn sink_tab_below_shell(app: &AppHandle) {
-    use windows::Win32::Foundation::{HWND, LPARAM, RECT};
-    use windows::Win32::UI::WindowsAndMessaging::{EnumChildWindows, GetClientRect};
+    use windows::Win32::Foundation::{HWND, LPARAM};
+    use windows::Win32::UI::WindowsAndMessaging::EnumChildWindows;
 
     struct SinkCtx {
         parent: HWND,
-        client: RECT,
     }
 
     unsafe extern "system" fn sink_enum_proc(hwnd: HWND, lparam: LPARAM) -> windows::core::BOOL {
@@ -889,10 +896,14 @@ fn sink_tab_below_shell(app: &AppHandle) {
         use windows::Win32::Foundation::{POINT, RECT};
         use windows::Win32::Graphics::Gdi::MapWindowPoints;
         use windows::Win32::UI::WindowsAndMessaging::{
-            GetWindowRect, SetWindowPos, HWND_BOTTOM, SWP_NOACTIVATE, SWP_NOMOVE, SWP_NOSIZE,
+            GetParent, GetWindowRect, SetWindowPos, HWND_BOTTOM, HWND_TOP, SWP_NOACTIVATE,
+            SWP_NOMOVE, SWP_NOSIZE,
         };
 
         let ctx = &*(lparam.0 as *const SinkCtx);
+        if unsafe { GetParent(hwnd) }.ok() != Some(ctx.parent) {
+            return BOOL(1);
+        }
         let mut rect = RECT::default();
         if unsafe { GetWindowRect(hwnd, &mut rect) }.is_err() {
             return BOOL(1);
@@ -908,22 +919,17 @@ fn sink_tab_below_shell(app: &AppHandle) {
             },
         ];
         unsafe { MapWindowPoints(None, Some(ctx.parent), &mut corners) };
-        let covers_client = corners[0].x <= 0
-            && corners[0].y <= 0
-            && corners[1].x >= ctx.client.right
-            && corners[1].y >= ctx.client.bottom;
-        if !covers_client {
-            unsafe {
-                let _ = SetWindowPos(
-                    hwnd,
-                    Some(HWND_BOTTOM),
-                    0,
-                    0,
-                    0,
-                    0,
-                    SWP_NOMOVE | SWP_NOSIZE | SWP_NOACTIVATE,
-                );
-            }
+        let shell_layer = hwnd_is_shell_layer(corners[0].x, corners[0].y);
+        unsafe {
+            let _ = SetWindowPos(
+                hwnd,
+                Some(if shell_layer { HWND_TOP } else { HWND_BOTTOM }),
+                0,
+                0,
+                0,
+                0,
+                SWP_NOMOVE | SWP_NOSIZE | SWP_NOACTIVATE,
+            );
         }
         BOOL(1)
     }
@@ -935,14 +941,7 @@ fn sink_tab_below_shell(app: &AppHandle) {
         return;
     };
     let native = HWND(hwnd.0 as *mut _);
-    let mut client = RECT::default();
-    if unsafe { GetClientRect(native, &mut client) }.is_err() {
-        return;
-    }
-    let ctx = SinkCtx {
-        parent: native,
-        client,
-    };
+    let ctx = SinkCtx { parent: native };
     unsafe {
         let _ = EnumChildWindows(
             Some(native),
@@ -994,6 +993,9 @@ pub fn set_shell_expanded(app: &AppHandle, expanded: bool) -> Result<(), String>
         .map(|runtime| runtime.shell_collapsed != collapsed)
         .unwrap_or(true);
     if !changed {
+        if expanded {
+            sink_tab_below_shell(app);
+        }
         return Ok(());
     }
     app.state::<AppState>()
@@ -1016,6 +1018,10 @@ pub fn set_shell_expanded(app: &AppHandle, expanded: bool) -> Result<(), String>
         .set_position(LogicalPosition::new(0.0, 0.0))
         .map_err(|error| error.to_string())?;
     shell.set_size(target).map_err(|error| error.to_string())?;
+    if expanded {
+        // 扩幅后标签层仍可能盖在 UI 上：汉堡菜单画在 chrome 下方，会被网页挡住。
+        sink_tab_below_shell(app);
+    }
     Ok(())
 }
 
@@ -1031,10 +1037,10 @@ pub fn show_active_tab(app: &AppHandle) {
     hide_all_tabs(app);
     if let Some(id) = active {
         if let Some(webview) = app.get_webview(&tab_label(&id)) {
-            // 防御性再下沉一次：任何路径把 z 序抬起来都能在这里纠正。
-            sink_tab_below_shell(app);
             let _ = webview.show();
             let _ = webview.set_focus();
+            // 焦点会把标签 HWND 抬到同级最上，必须在 set_focus 之后再压下去。
+            sink_tab_below_shell(app);
         }
     }
 }
@@ -1483,6 +1489,12 @@ mod tests {
         );
         assert_eq!(proxy_browser_args_with_cdp("system", "", None), None);
     }
+    #[test]
+    fn shell_layer_starts_at_origin_tab_layer_does_not() {
+        assert!(hwnd_is_shell_layer(0, 0));
+        assert!(!hwnd_is_shell_layer(0, CHROME_HEIGHT as i32));
+    }
+
     #[test]
     fn tab_content_visibility_requires_window_and_unlock() {
         let runtime = runtime_with(Vec::new(), None, Vec::new(), false);
