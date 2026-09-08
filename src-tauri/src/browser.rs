@@ -32,6 +32,8 @@ pub const CHROME_HEIGHT: f64 = 86.0;
 
 /// 代理分支会覆盖 Wry 默认参数，因此只补回 UI/PDF 兼容项，不关闭 SmartScreen。
 const WEBVIEW2_DEFAULT_ARGS: &str = "--disable-features=msWebOOUI,msPdfOOUI";
+/// 开发态默认 CDP 端口；生产默认关闭。可用 QUICKPANE_CDP_PORT 覆盖，0 表示关闭。
+pub const DEFAULT_CDP_PORT: u16 = 9222;
 
 pub(crate) const MUTE_TAB_SCRIPT: &str = r#"
 window.__qpMuteObserver?.disconnect();
@@ -80,16 +82,57 @@ document.addEventListener("click", (event) => {
 }, true);
 "#;
 
+/// 解析 CDP 端口：环境变量优先；未设置时开发默认 9222，生产关闭。
+pub fn cdp_port_from_env() -> Option<u16> {
+    match std::env::var("QUICKPANE_CDP_PORT") {
+        Ok(value) => {
+            let trimmed = value.trim();
+            if trimmed.is_empty() || trimmed == "0" {
+                return None;
+            }
+            trimmed.parse::<u16>().ok().filter(|port| *port > 0)
+        }
+        Err(_) => {
+            if cfg!(debug_assertions) {
+                Some(DEFAULT_CDP_PORT)
+            } else {
+                None
+            }
+        }
+    }
+}
+
+fn with_cdp_args(base: Option<String>, cdp_port: Option<u16>) -> Option<String> {
+    let Some(port) = cdp_port else {
+        return base;
+    };
+    let extra = format!("--remote-debugging-port={port}");
+    Some(match base {
+        Some(args) if !args.is_empty() => format!("{args} {extra}"),
+        _ => extra,
+    })
+}
+
 /// 代理设置 → WebView2 附加浏览器参数；system 模式返回 None（使用默认行为）。
+/// `cdp_port` 为 Some 时追加 `--remote-debugging-port`，供自动化连接主 WebView / 标签 WebView。
 pub fn proxy_browser_args(proxy_mode: &str, proxy_url: &str) -> Option<String> {
-    match proxy_mode {
+    proxy_browser_args_with_cdp(proxy_mode, proxy_url, None)
+}
+
+pub fn proxy_browser_args_with_cdp(
+    proxy_mode: &str,
+    proxy_url: &str,
+    cdp_port: Option<u16>,
+) -> Option<String> {
+    let base = match proxy_mode {
         "direct" => Some(format!("{WEBVIEW2_DEFAULT_ARGS} --no-proxy-server")),
         "custom" => {
             let url = proxy_url.trim();
             (!url.is_empty()).then(|| format!("{WEBVIEW2_DEFAULT_ARGS} --proxy-server={url}"))
         }
         _ => None,
-    }
+    };
+    with_cdp_args(base, cdp_port)
 }
 
 /// 代理是 WebView2 环境级参数，修改后必须关闭全部标签 WebView 再重建才生效。
@@ -1447,6 +1490,21 @@ mod tests {
                     .into(),
             )
         );
+    }
+
+    #[test]
+    fn cdp_port_appends_remote_debugging_arg() {
+        assert_eq!(
+            proxy_browser_args_with_cdp("system", "", Some(9222)).as_deref(),
+            Some("--remote-debugging-port=9222")
+        );
+        assert_eq!(
+            proxy_browser_args_with_cdp("direct", "", Some(9222)).as_deref(),
+            Some(
+                "--disable-features=msWebOOUI,msPdfOOUI --no-proxy-server --remote-debugging-port=9222",
+            )
+        );
+        assert_eq!(proxy_browser_args_with_cdp("system", "", None), None);
     }
     #[test]
     fn tab_content_visibility_requires_window_and_unlock() {

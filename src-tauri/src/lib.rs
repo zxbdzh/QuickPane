@@ -1149,8 +1149,32 @@ fn register_commands(builder: tauri::Builder<tauri::Wry>) -> tauri::Builder<taur
     ])
 }
 
+/// 开发态默认打开 CDP；已有 WEBVIEW2_ADDITIONAL_BROWSER_ARGUMENTS 时只追加端口，不覆盖调用方参数。
+fn apply_cdp_browser_env() {
+    let Some(port) = browser::cdp_port_from_env() else {
+        return;
+    };
+    let extra = format!("--remote-debugging-port={port}");
+    match std::env::var("WEBVIEW2_ADDITIONAL_BROWSER_ARGUMENTS") {
+        Ok(existing)
+            if existing
+                .split_whitespace()
+                .any(|part| part.starts_with("--remote-debugging-port=")) => {}
+        Ok(existing) => {
+            let merged = format!("{existing} {extra}");
+            unsafe {
+                std::env::set_var("WEBVIEW2_ADDITIONAL_BROWSER_ARGUMENTS", merged);
+            }
+        }
+        Err(_) => unsafe {
+            std::env::set_var("WEBVIEW2_ADDITIONAL_BROWSER_ARGUMENTS", extra);
+        },
+    }
+}
+
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
+    apply_cdp_browser_env();
     let builder = tauri::Builder::default()
         .plugin(tauri_plugin_single_instance::init(|app, _args, _cwd| {
             show_window(app);
