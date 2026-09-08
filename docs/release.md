@@ -54,3 +54,13 @@ updater 私钥只能保存为 GitHub Secret 或本机安全文件，不能提交
 - `UPDATE_SIGNATURE`
 
 可选变量：`UPDATE_NOTES`、`UPDATE_PUB_DATE`、`UPDATE_MANIFEST`。平台目标固定为 Windows x64：`windows-x86_64`。
+
+## GitHub 仓库门面
+
+仓库主页应指向最新 Release：`https://github.com/zxbdzh/QuickPane/releases/latest`。
+
+社交预览图（Open Graph）GitHub 没有公开上传 API，需在网页上手动设置：
+
+1. 打开 https://github.com/zxbdzh/QuickPane/settings
+2. 找到 **Social preview**
+3. 上传 `docs/assets/quickpane-social-preview.png`（1280×640）
