@@ -2899,7 +2899,7 @@ dependencies = [
 
 [[package]]
 name = "quickpane"
-version = "0.0.7"
+version = "0.0.8"
 dependencies = [
  "argon2",
  "base64 0.22.1",

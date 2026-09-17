@@ -16,7 +16,7 @@ use crate::state::{
 
 #[cfg(windows)]
 use webview2_com::{
-    AcceleratorKeyPressedEventHandler,
+    take_pwstr, AcceleratorKeyPressedEventHandler, SourceChangedEventHandler,
     Microsoft::Web::WebView2::Win32::{
         COREWEBVIEW2_KEY_EVENT_KIND, COREWEBVIEW2_KEY_EVENT_KIND_KEY_DOWN,
         COREWEBVIEW2_KEY_EVENT_KIND_SYSTEM_KEY_DOWN,
@@ -178,6 +178,31 @@ pub struct TabBounds {
 pub fn emit_snapshot(app: &AppHandle) {
     if let Some(state) = app.try_state::<AppState>() {
         let _ = app.emit("app-snapshot", state.snapshot());
+    }
+}
+
+/// SPA / History API 不会走 on_page_load，这里只改 tab.url 并推快照。
+fn apply_tab_url(app: &AppHandle, tab_id: &str, url: &str) {
+    let url = url.trim();
+    if url.is_empty() {
+        return;
+    }
+    let changed = app
+        .state::<AppState>()
+        .mutate(|runtime| {
+            runtime.data.tabs.iter_mut().find(|tab| tab.id == tab_id).is_some_and(|tab| {
+                if tab.url == url {
+                    false
+                } else {
+                    tab.url = url.to_string();
+                    tab.last_active_at = Utc::now();
+                    true
+                }
+            })
+        })
+        .unwrap_or(false);
+    if changed {
+        emit_snapshot(app);
     }
 }
 
@@ -381,7 +406,7 @@ pub fn ensure_tab_webview(app: &AppHandle, tab_id: &str) -> Result<(), String> {
         .map_err(|error| error.to_string())?;
     // 创建即下沉：保证新标签 WebView 永远位于 UI 层（main WebView）之下。
     sink_tab_below_shell(app);
-    install_tab_shortcuts(app, &webview)?;
+    install_tab_shortcuts(app, &webview, tab_id)?;
     if !is_active {
         webview.hide().map_err(|error| error.to_string())?;
     }
@@ -1156,11 +1181,13 @@ fn configured_tab_action(
     }
 }
 #[cfg(windows)]
-fn install_tab_shortcuts(app: &AppHandle, webview: &tauri::Webview) -> Result<(), String> {
+fn install_tab_shortcuts(app: &AppHandle, webview: &tauri::Webview, tab_id: &str) -> Result<(), String> {
     let app = app.clone();
+    let tab_id = tab_id.to_string();
     webview
         .with_webview(move |platform| {
             let controller = platform.controller();
+            let app_for_keys = app.clone();
             // 以下 COM 调用只跨越 WebView2 的 FFI 边界，不改变 Rust 所有权数据。
             let handler =
                 AcceleratorKeyPressedEventHandler::create(Box::new(move |_sender, args| {
@@ -1181,7 +1208,7 @@ fn install_tab_shortcuts(app: &AppHandle, webview: &tauri::Webview) -> Result<()
                     let ctrl = unsafe { GetKeyState(VK_CONTROL.0 as i32) } < 0;
                     let shift = unsafe { GetKeyState(VK_SHIFT.0 as i32) } < 0;
                     let alt = unsafe { GetKeyState(VK_MENU.0 as i32) } < 0;
-                    let shortcut = configured_tab_action(&app, ctrl, shift, alt, key as u16).or(
+                    let shortcut = configured_tab_action(&app_for_keys, ctrl, shift, alt, key as u16).or(
                         match (ctrl, shift, key as u16) {
                             (true, false, key) if key == VK_TAB.0 => Some("next-tab"),
                             (true, true, key) if key == VK_TAB.0 => Some("previous-tab"),
@@ -1212,11 +1239,11 @@ fn install_tab_shortcuts(app: &AppHandle, webview: &tauri::Webview) -> Result<()
                     };
                     // 面板与地址栏动作的键盘输入在主 WebView：先转移 OS 焦点再转发。
                     if matches!(shortcut, "quick-switch" | "focus-address") {
-                        if let Some(shell) = app.get_webview("main") {
+                        if let Some(shell) = app_for_keys.get_webview("main") {
                             let _ = shell.set_focus();
                         }
                     }
-                    let _ = app.emit_to(
+                    let _ = app_for_keys.emit_to(
                         tauri::EventTarget::webview_window("main"),
                         "browser-shortcut",
                         shortcut,
@@ -1229,12 +1256,36 @@ fn install_tab_shortcuts(app: &AppHandle, webview: &tauri::Webview) -> Result<()
             {
                 eprintln!("无法安装标签快捷键: {error}");
             }
+
+            if let Ok(core) = unsafe { controller.CoreWebView2() } {
+                let app_for_source = app.clone();
+                let tab_id_for_source = tab_id.clone();
+                let source_handler =
+                    SourceChangedEventHandler::create(Box::new(move |sender, _args| {
+                        let Some(core) = sender else {
+                            return Ok(());
+                        };
+                        let mut uri = windows::core::PWSTR::null();
+                        if unsafe { core.Source(&mut uri) }.is_err() {
+                            return Ok(());
+                        }
+                        let current_url = take_pwstr(uri);
+                        apply_tab_url(&app_for_source, &tab_id_for_source, &current_url);
+                        Ok(())
+                    }));
+                let mut source_token = 0;
+                if let Err(error) =
+                    unsafe { core.add_SourceChanged(&source_handler, &mut source_token) }
+                {
+                    eprintln!("无法监听 SourceChanged: {error}");
+                }
+            }
         })
         .map_err(|error| error.to_string())
 }
 
 #[cfg(not(windows))]
-fn install_tab_shortcuts(_app: &AppHandle, _webview: &tauri::Webview) -> Result<(), String> {
+fn install_tab_shortcuts(_app: &AppHandle, _webview: &tauri::Webview, _tab_id: &str) -> Result<(), String> {
     Ok(())
 }
 

@@ -91,6 +91,7 @@ function App() {
   const overlayOpen = navOverlayOpen || tabStripOverlayOpen;
   const addressRef = useRef<HTMLInputElement>(null);
   const lastActiveUrl = useRef<string | null>(null);
+  const syncedAddress = useRef("");
 
   const activeTab = useMemo(
     () =>
@@ -256,12 +257,16 @@ function App() {
   }, [applySnapshot]);
 
   useEffect(() => {
-    // 只有当用户没有在地址栏输入/焦点不在地址栏时，才从 activeTab 同步 url
-    if (document.activeElement === addressRef.current) return;
-    setAddress(
-      activeTab?.url === "quickpane://newtab" ? "" : (activeTab?.url ?? ""),
-    );
-  }, [activeTab?.id, activeTab?.url]);
+    const next =
+      activeTab?.url === "quickpane://newtab" ? "" : (activeTab?.url ?? "");
+    // 点击网页不会让壳层 input 失焦，不能用 focus 判断；只有用户改过地址才跳过。
+    const editing =
+      document.activeElement === addressRef.current &&
+      address !== syncedAddress.current;
+    if (editing) return;
+    syncedAddress.current = next;
+    if (address !== next) setAddress(next);
+  }, [activeTab?.id, activeTab?.url, address]);
 
   const openSection = useCallback(
     (next: ShellSection) => {
