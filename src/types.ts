@@ -113,6 +113,7 @@ export type AppSnapshot = {
   firstRun: boolean;
   hasPassword: boolean;
   windowVisible: boolean;
+  windowAlwaysOnTop: boolean;
   pinnedExtensions: BrowserExtension[];
   recoveryMessage: string | null;
 };

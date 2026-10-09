@@ -71,6 +71,7 @@ const EMPTY_SNAPSHOT: AppSnapshot = {
   firstRun: true,
   hasPassword: false,
   windowVisible: true,
+  windowAlwaysOnTop: false,
   pinnedExtensions: [],
   recoveryMessage: null,
 };
@@ -82,6 +83,7 @@ function App() {
   const [address, setAddress] = useState("");
   const [error, setError] = useState<string | null>(null);
   const [zoom, setZoom] = useState(1);
+  const [windowTopPending, setWindowTopPending] = useState(false);
   const [navOverlayOpen, setNavOverlayOpen] = useState(false);
   const [tabStripOverlayOpen, setTabStripOverlayOpen] = useState(false);
   const [paletteRequest, setPaletteRequest] = useState<{
@@ -184,7 +186,7 @@ function App() {
   // main WebView 扩缩：浏览态收缩到 chrome（网页区域无遮挡、鼠标直达网页）；
   // 浮层/非浏览页/锁屏扩回满幅。收缩延迟一拍，等浮层退场动画播完再缩窗。
   useEffect(() => {
-    const expanded = locked || !browsing || overlayOpen;
+    const expanded = locked || !browsing || overlayOpen || Boolean(error);
     if (!expanded) {
       const timer = window.setTimeout(
         () => void run(() => api.setShellExpanded(false)),
@@ -193,7 +195,7 @@ function App() {
       return () => window.clearTimeout(timer);
     }
     void run(() => api.setShellExpanded(true));
-  }, [browsing, locked, overlayOpen, run]);
+  }, [browsing, error, locked, overlayOpen, run]);
 
   const runSnapshot = useCallback(
     async (action: () => Promise<AppSnapshot>) => {
@@ -203,6 +205,35 @@ function App() {
     },
     [applySnapshot, run],
   );
+
+  const switchWorkspace = useCallback(
+    async (workspaceId: string) => {
+      const next = await runSnapshot(() => api.switchWorkspace(workspaceId));
+      if (next) setSection("newtab");
+    },
+    [runSnapshot],
+  );
+
+  const restoreSessionSnapshot = useCallback(
+    async (snapshotId: string, asNewWorkspace: boolean) => {
+      const next = await runSnapshot(() =>
+        api.restoreSessionSnapshot(snapshotId, asNewWorkspace),
+      );
+      // 成功后展示恢复的页面；失败时保留原有管理页和错误提示。
+      if (next) setSection("newtab");
+    },
+    [runSnapshot],
+  );
+
+  const toggleWindowTop = async () => {
+    if (windowTopPending) return;
+    setWindowTopPending(true);
+    try {
+      await runSnapshot(() => api.setWindowAlwaysOnTop(!snapshot.windowAlwaysOnTop));
+    } finally {
+      setWindowTopPending(false);
+    }
+  };
 
   useEffect(() => {
     void api
@@ -512,7 +543,7 @@ function App() {
                   void runSnapshot(() => api.removeWorkspace(workspaceId))
                 }
                 onSwitchWorkspace={(workspaceId) =>
-                  void runSnapshot(() => api.switchWorkspace(workspaceId))
+                  void switchWorkspace(workspaceId)
                 }
                 onSaveSnapshot={(name) =>
                   void runSnapshot(() => api.saveSessionSnapshot(name))
@@ -533,12 +564,10 @@ function App() {
                   void runSnapshot(() => api.restoreClosedTab(id))
                 }
                 onSwitchWorkspace={(workspaceId) =>
-                  void runSnapshot(() => api.switchWorkspace(workspaceId))
+                  void switchWorkspace(workspaceId)
                 }
                 onRestoreSnapshot={(snapshotId) =>
-                  void runSnapshot(() =>
-                    api.restoreSessionSnapshot(snapshotId, false),
-                  )
+                  void restoreSessionSnapshot(snapshotId, false)
                 }
                 onOpenUrl={(url) => createTab(url)}
                 onOpenChange={setTabStripOverlayOpen}
@@ -562,6 +591,9 @@ function App() {
                 }
                 onOverlayOpenChange={setNavOverlayOpen}
                 windowVisible={snapshot.windowVisible}
+                windowAlwaysOnTop={snapshot.windowAlwaysOnTop}
+                windowTopPending={windowTopPending}
+                onToggleWindowTop={() => void toggleWindowTop()}
                 bookmarked={Boolean(
                   activeTab &&
                     snapshot.data.bookmarks.some(
@@ -690,12 +722,7 @@ function App() {
                         void runSnapshot(() => api.saveSessionSnapshot(name))
                       }
                       onRestoreSnapshot={(snapshotId, asNewWorkspace) =>
-                        void runSnapshot(() =>
-                          api.restoreSessionSnapshot(
-                            snapshotId,
-                            asNewWorkspace,
-                          ),
-                        )
+                        void restoreSessionSnapshot(snapshotId, asNewWorkspace)
                       }
                       onDeleteSnapshot={(snapshotId) =>
                         void runSnapshot(() =>

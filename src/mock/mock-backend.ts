@@ -167,6 +167,7 @@ function makeSnapshot(): AppSnapshot {
     firstRun: false,
     hasPassword: bootLocked,
     windowVisible: true,
+    windowAlwaysOnTop: false,
     pinnedExtensions: [],
     recoveryMessage: null,
   };
@@ -552,6 +553,11 @@ async function invoke(
     case "open_download":
     case "clear_site_data":
       return null;
+    case "set_window_always_on_top": {
+      snapshot.windowAlwaysOnTop = Boolean(args.enabled);
+      emitSnapshot();
+      return structuredClone(snapshot);
+    }
     case "hide_to_tray": {
       snapshot.windowVisible = false;
       emitSnapshot();

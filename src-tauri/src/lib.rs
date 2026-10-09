@@ -228,6 +228,12 @@ fn set_shell_expanded(app: AppHandle, expanded: bool) -> Result<(), String> {
 }
 
 #[tauri::command]
+async fn set_window_always_on_top(app: AppHandle, enabled: bool) -> Result<AppSnapshot, String> {
+    require_unlocked(&app)?;
+    windowing::set_window_always_on_top(&app, enabled)
+}
+
+#[tauri::command]
 fn hide_to_tray(app: AppHandle) -> Result<(), String> {
     require_unlocked(&app)?;
     hide_window(&app);
@@ -1120,6 +1126,7 @@ fn register_commands(builder: tauri::Builder<tauri::Wry>) -> tauri::Builder<taur
         find_in_page,
         zoom_page,
         show_shell,
+        set_window_always_on_top,
         hide_to_tray,
         show_from_tray,
         exit_app,

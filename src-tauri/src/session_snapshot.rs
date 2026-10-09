@@ -7,7 +7,7 @@ use crate::state::{
     AppSnapshot, AppState, RuntimeData, SessionSnapshotRecord, SessionSnapshotTab, TabRecord,
     WorkspaceRecord,
 };
-use crate::workspace::{close_all_tab_webviews, restore_active_tab_webview};
+use crate::workspace::replace_workspace_tabs;
 
 pub const NEW_TAB_URL: &str = "quickpane://newtab";
 pub const MAX_SESSION_SNAPSHOTS: usize = 100;
@@ -120,12 +120,19 @@ pub fn restore_session_snapshot_data(
         snapshot
             .tabs
             .into_iter()
-            .map(|t| TabRecord::new(t.url, t.title, t.pinned))
+            .map(|t| TabRecord {
+                pinned: t.pinned,
+                // 恢复的是标签元数据；真实 WebView 创建后才标记 loaded。
+                ..TabRecord::new(t.url, t.title, false)
+            })
             .collect()
     };
 
     let target_active_index = min(snapshot.active_index, restored_tabs.len().saturating_sub(1));
     let next_active_id = restored_tabs.get(target_active_index).map(|t| t.id.clone());
+    runtime.shell_mode = restored_tabs
+        .get(target_active_index)
+        .is_none_or(|tab| tab.url == NEW_TAB_URL);
 
     if as_new_workspace {
         // 暂存当前激活工作区标签
@@ -195,14 +202,9 @@ pub fn restore_session_snapshot(
     snapshot_id: &str,
     as_new_workspace: bool,
 ) -> Result<AppSnapshot, String> {
-    let state = app.state::<AppState>();
-    close_all_tab_webviews(app);
-    state.mutate_result(|runtime| {
+    replace_workspace_tabs(app, |runtime| {
         restore_session_snapshot_data(runtime, snapshot_id, as_new_workspace)
-    })?;
-    restore_active_tab_webview(app);
-    emit_snapshot(app);
-    Ok(state.snapshot())
+    })
 }
 
 #[cfg(test)]
@@ -231,6 +233,7 @@ mod tests {
             locked: false,
             first_run: false,
             window_visible: true,
+            window_always_on_top: false,
             quitting: false,
             shell_mode: false,
             shell_collapsed: false,
@@ -293,6 +296,59 @@ mod tests {
         // 原工作区 tabs 已安全暂存
         assert_eq!(rt.data.workspaces[0].tabs.len(), 2);
         assert_eq!(rt.data.workspaces[0].tabs[0].id, original_t1_id);
+    }
+
+    #[test]
+    fn restore_preserves_pinned_tabs_without_marking_them_loaded() {
+        let mut rt = runtime_fixture();
+        rt.data.tabs[0].pinned = true;
+        let saved = save_session_snapshot_data(&mut rt, "固定标签").unwrap();
+
+        for as_new_workspace in [false, true] {
+            let mut restored = rt.clone();
+            restore_session_snapshot_data(&mut restored, &saved.id, as_new_workspace).unwrap();
+            assert!(restored.data.tabs[0].pinned, "恢复后保留固定状态");
+            assert!(restored
+                .data
+                .tabs
+                .iter()
+                .all(|tab| !tab.loaded && !tab.loading));
+            assert_eq!(
+                restored.data.active_tab_id,
+                Some(restored.data.tabs[1].id.clone())
+            );
+        }
+    }
+
+    #[test]
+    fn restore_website_exits_shell_mode() {
+        let mut rt = runtime_fixture();
+        let saved = save_session_snapshot_data(&mut rt, "网站会话").unwrap();
+        rt.shell_mode = true;
+        restore_session_snapshot_data(&mut rt, &saved.id, false).unwrap();
+        assert!(!rt.shell_mode, "从新标签页或设置页恢复网站必须创建真实页面");
+    }
+
+    #[test]
+    fn restore_new_tab_and_empty_snapshot_enter_shell_mode() {
+        let mut rt = runtime_fixture();
+        for tabs in [
+            vec![SessionSnapshotTab {
+                url: NEW_TAB_URL.into(),
+                title: "新标签页".into(),
+                pinned: false,
+            }],
+            Vec::new(),
+        ] {
+            let saved = SessionSnapshotRecord::new("新标签页会话", tabs, usize::MAX);
+            rt.data.session_snapshots.push(saved.clone());
+            rt.shell_mode = false;
+            restore_session_snapshot_data(&mut rt, &saved.id, false).unwrap();
+            assert!(rt.shell_mode);
+            assert_eq!(rt.data.tabs.len(), 1);
+            assert_eq!(rt.data.tabs[0].url, NEW_TAB_URL);
+            assert_eq!(rt.data.active_tab_id, Some(rt.data.tabs[0].id.clone()));
+        }
     }
 
     #[test]

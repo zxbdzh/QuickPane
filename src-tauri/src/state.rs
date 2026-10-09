@@ -246,6 +246,7 @@ pub struct AppSnapshot {
     pub first_run: bool,
     pub has_password: bool,
     pub window_visible: bool,
+    pub window_always_on_top: bool,
     /// 固定到导航栏的扩展（从磁盘实时解析，随快照事件刷新）。
     pub pinned_extensions: Vec<ExtInfo>,
     pub recovery_message: Option<String>,
@@ -273,6 +274,7 @@ impl AppSnapshot {
             first_run: runtime.first_run,
             has_password,
             window_visible: runtime.window_visible,
+            window_always_on_top: runtime.window_always_on_top,
             pinned_extensions: if is_redacted {
                 Vec::new()
             } else {
@@ -289,6 +291,8 @@ pub struct RuntimeData {
     pub locked: bool,
     pub first_run: bool,
     pub window_visible: bool,
+    /// 主窗口是否置顶；仅存在于运行态，重启后按默认关闭处理。
+    pub window_always_on_top: bool,
     pub quitting: bool,
     pub shell_mode: bool,
     /// 浏览态收缩：main WebView 只覆盖顶部 chrome（86px），网页区域无遮挡可交互；
@@ -343,6 +347,7 @@ impl AppState {
                 locked,
                 first_run: !existed || recovery_message.is_some(),
                 window_visible: true,
+                window_always_on_top: false,
                 quitting: false,
                 shell_mode: true,
                 shell_collapsed: false,
@@ -670,6 +675,7 @@ mod tests {
             locked: false,
             first_run: true,
             window_visible: true,
+            window_always_on_top: false,
             quitting: false,
             shell_mode: true,
             shell_collapsed: false,
@@ -695,6 +701,7 @@ mod tests {
                 locked: false,
                 first_run: false,
                 window_visible: true,
+                window_always_on_top: false,
                 quitting: false,
                 shell_mode: true,
                 shell_collapsed: false,
@@ -721,6 +728,7 @@ mod tests {
                 locked: false,
                 first_run: false,
                 window_visible: true,
+                window_always_on_top: false,
                 quitting: false,
                 shell_mode: true,
                 shell_collapsed: false,
@@ -760,6 +768,7 @@ mod tests {
                 locked: false,
                 first_run: false,
                 window_visible: true,
+                window_always_on_top: false,
                 quitting: false,
                 shell_mode: true,
                 shell_collapsed: false,
@@ -814,6 +823,7 @@ mod tests {
                 locked: false,
                 first_run: false,
                 window_visible: true,
+                window_always_on_top: false,
                 quitting: false,
                 shell_mode: true,
                 shell_collapsed: false,

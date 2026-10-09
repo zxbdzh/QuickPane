@@ -14,6 +14,8 @@ import {
   LoaderCircle,
   Lock,
   Menu,
+  Pin,
+  PinOff,
   PanelTopClose,
   Puzzle,
   RefreshCw,
@@ -36,7 +38,7 @@ import { IconButton } from "./icon-button";
 import { Kbd } from "./ui/kbd";
 
 /** 导航栏：高 54px（与标签栏合计 86px，对应 Rust 侧 CHROME_HEIGHT） */
-function NavigationBar({ activeTab, address, onAddress, onSubmit, addressRef, suggestions, onSuggestion, onOverlayOpenChange, windowVisible, bookmarked, onBookmark, onBack, onForward, onReload, onHome, onHide, hasPassword, onOpenSection, onLockNow, pinnedExtensions, onExtensionClick, keywordSource, workspaces, onOpenUrl, onCloseTab, onMoveTabToWorkspace }: {
+function NavigationBar({ activeTab, address, onAddress, onSubmit, addressRef, suggestions, onSuggestion, onOverlayOpenChange, windowVisible, windowAlwaysOnTop, windowTopPending, onToggleWindowTop, bookmarked, onBookmark, onBack, onForward, onReload, onHome, onHide, hasPassword, onOpenSection, onLockNow, pinnedExtensions, onExtensionClick, keywordSource, workspaces, onOpenUrl, onCloseTab, onMoveTabToWorkspace }: {
   activeTab: TabRecord | null;
   address: string;
   onAddress: (value: string) => void;
@@ -47,6 +49,9 @@ function NavigationBar({ activeTab, address, onAddress, onSubmit, addressRef, su
   /** 地址下拉或菜单任一浮层开合时上报：驱动 main WebView 扩幅/收缩。 */
   onOverlayOpenChange: (open: boolean) => void;
   windowVisible: boolean;
+  windowAlwaysOnTop: boolean;
+  windowTopPending: boolean;
+  onToggleWindowTop: () => void;
   bookmarked: boolean;
   onBookmark: () => void;
   onBack: () => void;
@@ -437,6 +442,16 @@ function NavigationBar({ activeTab, address, onAddress, onSubmit, addressRef, su
             )}
           </button>
         ))}
+        <IconButton
+          label={windowAlwaysOnTop ? "取消窗口置顶" : "置顶窗口"}
+          aria-pressed={windowAlwaysOnTop}
+          aria-busy={windowTopPending}
+          disabled={windowTopPending}
+          onClick={onToggleWindowTop}
+          className={cn(windowAlwaysOnTop && "bg-soft text-primary hover:bg-soft hover:text-primary")}
+        >
+          {windowAlwaysOnTop ? <PinOff className="size-4" /> : <Pin className="size-4" />}
+        </IconButton>
         <IconButton label="隐藏窗口" onClick={onHide}><PanelTopClose className="size-4" /></IconButton>
         <div
           data-qp-menu

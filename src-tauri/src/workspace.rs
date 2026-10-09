@@ -5,7 +5,7 @@
 use tauri::{AppHandle, Manager};
 
 use crate::browser::{
-    emit_snapshot, ensure_tab_webview, hide_all_tabs, set_shell_expanded, show_active_tab,
+    emit_snapshot, ensure_tab_webview, hide_all_tabs, set_shell_expanded, sink_tab_below_shell,
     tab_label, MUTE_TAB_SCRIPT, UNMUTE_TAB_SCRIPT,
 };
 use crate::state::{
@@ -353,64 +353,149 @@ pub(crate) fn batch_mute_data(runtime: &mut RuntimeData, tab_ids: &[String], mut
     }
 }
 
-pub(crate) fn close_all_tab_webviews(app: &AppHandle) {
-    let labels: Vec<String> = app
+/// 新页面就绪前保留旧 WebView；状态或写盘失败时，不销毁用户当前页面。
+pub(crate) fn replace_workspace_tabs(
+    app: &AppHandle,
+    action: impl FnOnce(&mut RuntimeData) -> Result<(), String>,
+) -> Result<AppSnapshot, String> {
+    let state = app.state::<AppState>();
+    let old_labels: Vec<String> = app
         .webviews()
         .keys()
         .filter(|label| label.starts_with("tab-"))
         .cloned()
         .collect();
-    for label in labels {
-        if let Some(webview) = app.get_webview(&label) {
-            let _ = webview.close();
+    let (previous, next_active_id, next_workspace_id) = state.mutate_result(|runtime| {
+        let previous = runtime.clone();
+        action(runtime)?;
+        Ok((
+            previous,
+            runtime.data.active_tab_id.clone(),
+            runtime.data.active_workspace_id.clone(),
+        ))
+    })?;
+
+    if let Err(error) = restore_active_tab_webview(app) {
+        let rolled_back = state.mutate_runtime(|runtime| {
+            rollback_workspace_tabs_data(runtime, &previous, &next_active_id, &next_workspace_id)
+        })?;
+        if !rolled_back {
+            return Err(error);
+        }
+        // 只清理本次创建的页面，不碰仍在使用的旧页面或其他转换的页面。
+        if let Some(id) = next_active_id.as_deref() {
+            let label = tab_label(id);
+            if !old_labels.contains(&label) {
+                if let Some(webview) = app.get_webview(&label) {
+                    let _ = webview.close();
+                }
+            }
+        }
+        let saved = state.save();
+        let restored = restore_active_tab_webview(app);
+        emit_snapshot(app);
+        if let Err(save_error) = saved {
+            return Err(format!(
+                "{error}；原页面已保留，但回滚状态保存失败：{save_error}"
+            ));
+        }
+        if let Err(restore_error) = restored {
+            return Err(format!("{error}；恢复原页面失败：{restore_error}"));
+        }
+        return Err(error);
+    }
+
+    let is_current = {
+        let runtime = state
+            .inner
+            .lock()
+            .map_err(|_| "应用状态无法读取".to_string())?;
+        runtime.data.active_tab_id == next_active_id
+            && runtime.data.active_workspace_id == next_workspace_id
+    };
+    if is_current {
+        let next_label = next_active_id.as_deref().map(tab_label);
+        for label in old_labels {
+            if Some(label.as_str()) != next_label.as_deref() {
+                if let Some(webview) = app.get_webview(&label) {
+                    let _ = webview.close();
+                }
+            }
         }
     }
+    emit_snapshot(app);
+    Ok(state.snapshot())
 }
 
-/// 装载完成后的收尾：按激活标签恢复 WebView（新标签页则先扩幅）。
-pub(crate) fn restore_active_tab_webview(app: &AppHandle) {
+fn rollback_workspace_tabs_data(
+    runtime: &mut RuntimeData,
+    previous: &RuntimeData,
+    expected_active_id: &Option<String>,
+    expected_workspace_id: &Option<String>,
+) -> bool {
+    // 后续切换已经接管时不覆盖它；置顶、锁定和其他设置也不属于标签回滚范围。
+    if runtime.data.active_tab_id != *expected_active_id
+        || runtime.data.active_workspace_id != *expected_workspace_id
+    {
+        return false;
+    }
+    runtime.data.tabs = previous.data.tabs.clone();
+    runtime.data.active_tab_id = previous.data.active_tab_id.clone();
+    runtime.data.workspaces = previous.data.workspaces.clone();
+    runtime.data.active_workspace_id = previous.data.active_workspace_id.clone();
+    runtime.data.recently_closed = previous.data.recently_closed.clone();
+    runtime.shell_mode = previous.shell_mode;
+    true
+}
+
+/// 装载完成后的收尾：按激活标签恢复 WebView，创建失败必须交给调用方回滚。
+pub(crate) fn restore_active_tab_webview(app: &AppHandle) -> Result<(), String> {
     let state = app.state::<AppState>();
-    let active = state
-        .inner
-        .lock()
-        .ok()
-        .and_then(|runtime| runtime.data.active_tab_id.clone());
-    let Some(id) = active else {
-        return;
+    let (active, locked) = {
+        let runtime = state
+            .inner
+            .lock()
+            .map_err(|_| "应用状态无法读取".to_string())?;
+        (
+            runtime.data.active_tab_id.as_ref().and_then(|id| {
+                runtime
+                    .data
+                    .tabs
+                    .iter()
+                    .find(|tab| &tab.id == id)
+                    .map(|tab| (tab.id.clone(), tab.url == NEW_TAB_URL))
+            }),
+            runtime.locked,
+        )
     };
-    let is_new_tab = state
-        .inner
-        .lock()
-        .ok()
-        .and_then(|runtime| {
-            runtime
-                .data
-                .tabs
-                .iter()
-                .find(|tab| tab.id == id)
-                .map(|tab| tab.url == NEW_TAB_URL)
-        })
-        .unwrap_or(false);
-    if is_new_tab {
-        // 新标签页：先扩幅再下发快照，避免收缩视口内的首帧布局跳动。
-        let _ = set_shell_expanded(app, true);
+    if locked {
         hide_all_tabs(app);
-    } else {
-        hide_all_tabs(app);
-        if ensure_tab_webview(app, &id).is_ok() {
-            show_active_tab(app);
+        return Ok(());
+    }
+    match active {
+        Some((id, false)) => {
+            ensure_tab_webview(app, &id)?;
+            let webview = app
+                .get_webview(&tab_label(&id))
+                .ok_or_else(|| "当前页面尚未加载".to_string())?;
+            hide_all_tabs(app);
+            webview.show().map_err(|error| error.to_string())?;
+            webview.set_focus().map_err(|error| error.to_string())?;
+            sink_tab_below_shell(app);
+        }
+        _ => {
+            // 新标签页先扩幅再下发快照，避免收缩视口内的首帧布局跳动。
+            set_shell_expanded(app, true)?;
+            hide_all_tabs(app);
         }
     }
+    Ok(())
 }
 
 pub fn create_workspace(app: &AppHandle, name: &str) -> Result<AppSnapshot, String> {
-    validate_workspace_name(name)?;
-    let state = app.state::<AppState>();
-    close_all_tab_webviews(app);
-    state.mutate_result(|runtime| create_workspace_data(runtime, name))?;
-    restore_active_tab_webview(app);
-    emit_snapshot(app);
-    Ok(state.snapshot())
+    replace_workspace_tabs(app, |runtime| {
+        create_workspace_data(runtime, name).map(|_| ())
+    })
 }
 
 pub fn rename_workspace(
@@ -433,31 +518,21 @@ pub fn remove_workspace(app: &AppHandle, workspace_id: &str) -> Result<AppSnapsh
 
 pub fn switch_workspace(app: &AppHandle, workspace_id: &str) -> Result<AppSnapshot, String> {
     let state = app.state::<AppState>();
-    {
+    let is_current = {
         let guard = state
             .inner
             .lock()
             .map_err(|_| "应用状态无法读取".to_string())?;
-        if guard.data.active_workspace_id.as_deref() == Some(workspace_id) {
-            return Ok(state.snapshot());
-        }
-        if !guard
-            .data
-            .workspaces
-            .iter()
-            .any(|workspace| workspace.id == workspace_id)
-        {
-            return Err("工作区不存在".into());
-        }
+        guard.data.active_workspace_id.as_deref() == Some(workspace_id)
+    };
+    // snapshot 也要获取状态锁，必须先释放上面的 guard。
+    if is_current {
+        return Ok(state.snapshot());
     }
-    close_all_tab_webviews(app);
-    state.mutate_result(|runtime| {
+    replace_workspace_tabs(app, |runtime| {
         stash_current_tabs(runtime);
         load_workspace_tabs(runtime, workspace_id)
-    })?;
-    restore_active_tab_webview(app);
-    emit_snapshot(app);
-    Ok(state.snapshot())
+    })
 }
 
 pub fn move_tab_to_workspace(
@@ -477,7 +552,7 @@ pub fn move_tab_to_workspace(
 
 pub fn apply_tab_batch(app: &AppHandle, update: &TabBatchUpdate) -> Result<AppSnapshot, String> {
     let state = app.state::<AppState>();
-    match update.action.as_str() {
+    let restored = match update.action.as_str() {
         "close" => {
             let closed = state.mutate_result(|runtime| {
                 let closed = batch_close_data(runtime, &update.tab_ids)?;
@@ -488,10 +563,11 @@ pub fn apply_tab_batch(app: &AppHandle, update: &TabBatchUpdate) -> Result<AppSn
                     let _ = webview.close();
                 }
             }
-            restore_active_tab_webview(app);
+            restore_active_tab_webview(app)
         }
         "bookmark" => {
             state.mutate(|runtime| batch_bookmark_data(runtime, &update.tab_ids))?;
+            Ok(())
         }
         "mute" | "unmute" => {
             let muted = update.action == "mute";
@@ -506,6 +582,7 @@ pub fn apply_tab_batch(app: &AppHandle, update: &TabBatchUpdate) -> Result<AppSn
                     let _ = webview.eval(script);
                 }
             }
+            Ok(())
         }
         "move" => {
             let workspace_id = update
@@ -524,12 +601,15 @@ pub fn apply_tab_batch(app: &AppHandle, update: &TabBatchUpdate) -> Result<AppSn
                 }
             }
             if active_changed {
-                restore_active_tab_webview(app);
+                restore_active_tab_webview(app)
+            } else {
+                Ok(())
             }
         }
         _ => return Err("未知的批量操作".into()),
-    }
+    };
     emit_snapshot(app);
+    restored?;
     Ok(state.snapshot())
 }
 
@@ -555,6 +635,7 @@ mod tests {
             locked: false,
             first_run: false,
             window_visible: true,
+            window_always_on_top: false,
             quitting: false,
             shell_mode: false,
             shell_collapsed: false,
@@ -567,6 +648,62 @@ mod tests {
         let mut record = TabRecord::new(url.into(), title.into(), false);
         record.last_active_at = chrono::Utc::now();
         record
+    }
+
+    #[test]
+    fn replacement_rollback_restores_tabs_but_preserves_window_state() {
+        let a = tab("https://a.example", "A");
+        let active = Some(a.id.clone());
+        let ws = WorkspaceRecord::new("工作");
+        let mut runtime = runtime_with(vec![a], active, vec![ws.clone()], Some(ws.id));
+        let previous = runtime.clone();
+        create_workspace_data(&mut runtime, "新工作区").unwrap();
+        let expected_active = runtime.data.active_tab_id.clone();
+        let expected_workspace = runtime.data.active_workspace_id.clone();
+        runtime.locked = true;
+        runtime.window_always_on_top = true;
+        runtime.data.settings.home_url = "https://changed.example".into();
+
+        assert!(rollback_workspace_tabs_data(
+            &mut runtime,
+            &previous,
+            &expected_active,
+            &expected_workspace,
+        ));
+        assert_eq!(
+            serde_json::to_value(&runtime.data.tabs).unwrap(),
+            serde_json::to_value(&previous.data.tabs).unwrap(),
+        );
+        assert_eq!(runtime.data.active_tab_id, previous.data.active_tab_id);
+        assert_eq!(
+            runtime.data.active_workspace_id,
+            previous.data.active_workspace_id
+        );
+        assert_eq!(runtime.data.workspaces.len(), 1);
+        assert_eq!(runtime.shell_mode, previous.shell_mode);
+        assert!(runtime.locked);
+        assert!(runtime.window_always_on_top);
+        assert_eq!(runtime.data.settings.home_url, "https://changed.example");
+    }
+
+    #[test]
+    fn replacement_rollback_does_not_overwrite_a_later_transition() {
+        let ws = WorkspaceRecord::new("工作");
+        let mut runtime = runtime_with(Vec::new(), None, vec![ws.clone()], Some(ws.id));
+        let previous = runtime.clone();
+        create_workspace_data(&mut runtime, "恢复工作区").unwrap();
+        let expected_active = runtime.data.active_tab_id.clone();
+        let expected_workspace = runtime.data.active_workspace_id.clone();
+        create_workspace_data(&mut runtime, "后续工作区").unwrap();
+        let later = serde_json::to_value(&runtime.data).unwrap();
+
+        assert!(!rollback_workspace_tabs_data(
+            &mut runtime,
+            &previous,
+            &expected_active,
+            &expected_workspace,
+        ));
+        assert_eq!(serde_json::to_value(&runtime.data).unwrap(), later);
     }
 
     #[test]

@@ -7,7 +7,7 @@ use tauri_plugin_global_shortcut::{GlobalShortcutExt, ShortcutState};
 
 use crate::{
     browser::{emit_snapshot, hide_all_tabs, set_all_muted, set_shell_mode, show_active_tab},
-    state::AppState,
+    state::{AppSnapshot, AppState},
 };
 
 pub fn install_tray(app: &AppHandle) -> Result<(), String> {
@@ -84,6 +84,23 @@ pub fn validate_shortcut(shortcut: &str) -> Result<(), String> {
         .parse::<tauri_plugin_global_shortcut::Shortcut>()
         .map(|_| ())
         .map_err(|_| "快捷键格式无效".into())
+}
+
+pub fn set_window_always_on_top(app: &AppHandle, enabled: bool) -> Result<AppSnapshot, String> {
+    let window = app
+        .get_window("main")
+        .ok_or_else(|| "主窗口不可用".to_string())?;
+    window
+        .set_always_on_top(enabled)
+        .map_err(|error| format!("无法更新窗口置顶：{error}"))?;
+    // 以原生窗口确认后的状态更新 UI，避免调用失败时按钮仍显示置顶成功。
+    let always_on_top = window
+        .is_always_on_top()
+        .map_err(|error| format!("无法读取窗口置顶状态：{error}"))?;
+    let state = app.state::<AppState>();
+    state.mutate_runtime(|runtime| runtime.window_always_on_top = always_on_top)?;
+    emit_snapshot(app);
+    Ok(state.snapshot())
 }
 
 pub fn toggle_window(app: &AppHandle) {

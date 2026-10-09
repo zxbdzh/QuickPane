@@ -69,6 +69,8 @@ export const api = {
   zoom: (scale: number) => invoke<void>("zoom_page", { scale }),
   showShell: (visible: boolean) =>
     invoke<AppSnapshot>("show_shell", { visible }),
+  setWindowAlwaysOnTop: (enabled: boolean) =>
+    invoke<AppSnapshot>("set_window_always_on_top", { enabled }),
   hide: () => invoke<void>("hide_to_tray"),
   exit: () => invoke<void>("exit_app"),
   setShortcut: (shortcut: string) =>

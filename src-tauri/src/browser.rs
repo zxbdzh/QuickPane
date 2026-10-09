@@ -1,4 +1,4 @@
-use std::{path::PathBuf, time::SystemTime};
+use std::{path::PathBuf, sync::Mutex, time::SystemTime};
 
 use chrono::Utc;
 use tauri::{
@@ -16,11 +16,12 @@ use crate::state::{
 
 #[cfg(windows)]
 use webview2_com::{
-    take_pwstr, AcceleratorKeyPressedEventHandler, SourceChangedEventHandler,
+    take_pwstr, AcceleratorKeyPressedEventHandler,
     Microsoft::Web::WebView2::Win32::{
         COREWEBVIEW2_KEY_EVENT_KIND, COREWEBVIEW2_KEY_EVENT_KIND_KEY_DOWN,
         COREWEBVIEW2_KEY_EVENT_KIND_SYSTEM_KEY_DOWN,
     },
+    SourceChangedEventHandler,
 };
 #[cfg(windows)]
 use windows::Win32::UI::Input::KeyboardAndMouse::{
@@ -34,6 +35,9 @@ pub const CHROME_HEIGHT: f64 = 86.0;
 const WEBVIEW2_DEFAULT_ARGS: &str = "--disable-features=msWebOOUI,msPdfOOUI";
 /// 开发态默认 CDP 端口；生产默认关闭。可用 QUICKPANE_CDP_PORT 覆盖，0 表示关闭。
 pub const DEFAULT_CDP_PORT: u16 = 9222;
+
+/// React 严格模式会并发恢复当前标签；创建入口必须串行，避免同名 WebView 竞态。
+static TAB_WEBVIEW_CREATION: Mutex<()> = Mutex::new(());
 
 pub(crate) const MUTE_TAB_SCRIPT: &str = r#"
 window.__qpMuteObserver?.disconnect();
@@ -190,15 +194,20 @@ fn apply_tab_url(app: &AppHandle, tab_id: &str, url: &str) {
     let changed = app
         .state::<AppState>()
         .mutate(|runtime| {
-            runtime.data.tabs.iter_mut().find(|tab| tab.id == tab_id).is_some_and(|tab| {
-                if tab.url == url {
-                    false
-                } else {
-                    tab.url = url.to_string();
-                    tab.last_active_at = Utc::now();
-                    true
-                }
-            })
+            runtime
+                .data
+                .tabs
+                .iter_mut()
+                .find(|tab| tab.id == tab_id)
+                .is_some_and(|tab| {
+                    if tab.url == url {
+                        false
+                    } else {
+                        tab.url = url.to_string();
+                        tab.last_active_at = Utc::now();
+                        true
+                    }
+                })
         })
         .unwrap_or(false);
     if changed {
@@ -279,6 +288,9 @@ fn browser_bounds(app: &AppHandle) -> Result<(LogicalPosition<f64>, LogicalSize<
 }
 
 pub fn ensure_tab_webview(app: &AppHandle, tab_id: &str) -> Result<(), String> {
+    let _creation_guard = TAB_WEBVIEW_CREATION
+        .lock()
+        .map_err(|_| "标签页创建状态不可用".to_string())?;
     let label = tab_label(tab_id);
     if app.get_webview(&label).is_some() {
         return Ok(());
@@ -908,7 +920,7 @@ fn hwnd_is_shell_layer(left: i32, top: i32) -> bool {
 /// tauri::Webview 未暴露 HWND，这里只处理主窗口直接子窗口：
 /// 贴原点的提到最上，其余压到最底——地址下拉、菜单等浮层才能盖住网页。
 #[cfg(windows)]
-fn sink_tab_below_shell(app: &AppHandle) {
+pub(crate) fn sink_tab_below_shell(app: &AppHandle) {
     use windows::Win32::Foundation::{HWND, LPARAM};
     use windows::Win32::UI::WindowsAndMessaging::EnumChildWindows;
 
@@ -977,7 +989,7 @@ fn sink_tab_below_shell(app: &AppHandle) {
 }
 
 #[cfg(not(windows))]
-fn sink_tab_below_shell(_app: &AppHandle) {}
+pub(crate) fn sink_tab_below_shell(_app: &AppHandle) {}
 
 pub fn resize_tabs(app: &AppHandle) {
     let Ok((position, size)) = browser_bounds(app) else {
@@ -1181,7 +1193,11 @@ fn configured_tab_action(
     }
 }
 #[cfg(windows)]
-fn install_tab_shortcuts(app: &AppHandle, webview: &tauri::Webview, tab_id: &str) -> Result<(), String> {
+fn install_tab_shortcuts(
+    app: &AppHandle,
+    webview: &tauri::Webview,
+    tab_id: &str,
+) -> Result<(), String> {
     let app = app.clone();
     let tab_id = tab_id.to_string();
     webview
@@ -1208,29 +1224,32 @@ fn install_tab_shortcuts(app: &AppHandle, webview: &tauri::Webview, tab_id: &str
                     let ctrl = unsafe { GetKeyState(VK_CONTROL.0 as i32) } < 0;
                     let shift = unsafe { GetKeyState(VK_SHIFT.0 as i32) } < 0;
                     let alt = unsafe { GetKeyState(VK_MENU.0 as i32) } < 0;
-                    let shortcut = configured_tab_action(&app_for_keys, ctrl, shift, alt, key as u16).or(
-                        match (ctrl, shift, key as u16) {
-                            (true, false, key) if key == VK_TAB.0 => Some("next-tab"),
-                            (true, true, key) if key == VK_TAB.0 => Some("previous-tab"),
-                            (true, false, key) if key == VK_T.0 => Some("new-tab"),
-                            (true, true, key) if key == VK_T.0 => Some("restore-tab"),
-                            (true, false, key) if key == VK_L.0 => Some("focus-address"),
-                            (true, false, key) if key == VK_W.0 => Some("close-tab"),
-                            (true, false, key) if key == VK_K.0 => Some("quick-switch"),
-                            (true, false, key) if key == VK_H.0 => Some("history"),
-                            (true, false, key) if key == VK_J.0 => Some("downloads"),
-                            (true, false, key) if key == VK_D.0 => Some("bookmark"),
-                            (true, false, key) if key == VK_F.0 => Some("find"),
-                            (true, false, key) if key == VK_OEM_PLUS.0 || key == VK_ADD.0 => {
-                                Some("zoom-in")
-                            }
-                            (true, false, key) if key == VK_OEM_MINUS.0 || key == VK_SUBTRACT.0 => {
-                                Some("zoom-out")
-                            }
-                            (true, false, key) if key == VK_0.0 => Some("zoom-reset"),
-                            _ => None,
-                        },
-                    );
+                    let shortcut =
+                        configured_tab_action(&app_for_keys, ctrl, shift, alt, key as u16).or(
+                            match (ctrl, shift, key as u16) {
+                                (true, false, key) if key == VK_TAB.0 => Some("next-tab"),
+                                (true, true, key) if key == VK_TAB.0 => Some("previous-tab"),
+                                (true, false, key) if key == VK_T.0 => Some("new-tab"),
+                                (true, true, key) if key == VK_T.0 => Some("restore-tab"),
+                                (true, false, key) if key == VK_L.0 => Some("focus-address"),
+                                (true, false, key) if key == VK_W.0 => Some("close-tab"),
+                                (true, false, key) if key == VK_K.0 => Some("quick-switch"),
+                                (true, false, key) if key == VK_H.0 => Some("history"),
+                                (true, false, key) if key == VK_J.0 => Some("downloads"),
+                                (true, false, key) if key == VK_D.0 => Some("bookmark"),
+                                (true, false, key) if key == VK_F.0 => Some("find"),
+                                (true, false, key) if key == VK_OEM_PLUS.0 || key == VK_ADD.0 => {
+                                    Some("zoom-in")
+                                }
+                                (true, false, key)
+                                    if key == VK_OEM_MINUS.0 || key == VK_SUBTRACT.0 =>
+                                {
+                                    Some("zoom-out")
+                                }
+                                (true, false, key) if key == VK_0.0 => Some("zoom-reset"),
+                                _ => None,
+                            },
+                        );
                     let Some(shortcut) = shortcut else {
                         return Ok(());
                     };
@@ -1285,7 +1304,11 @@ fn install_tab_shortcuts(app: &AppHandle, webview: &tauri::Webview, tab_id: &str
 }
 
 #[cfg(not(windows))]
-fn install_tab_shortcuts(_app: &AppHandle, _webview: &tauri::Webview, _tab_id: &str) -> Result<(), String> {
+fn install_tab_shortcuts(
+    _app: &AppHandle,
+    _webview: &tauri::Webview,
+    _tab_id: &str,
+) -> Result<(), String> {
     Ok(())
 }
 
@@ -1503,6 +1526,7 @@ mod tests {
             locked: false,
             first_run: false,
             window_visible: true,
+            window_always_on_top: false,
             quitting: false,
             shell_mode,
             shell_collapsed: false,
