@@ -120,8 +120,10 @@ export const api = {
     invoke<void>("show_tab_menu_window", { tabId, x, y }),
   setShellExpanded: (expanded: boolean) =>
     invoke<void>("set_shell_expanded", { expanded }),
-  showExtensionPopup: (url: string, x?: number, y?: number) =>
-    invoke<void>("show_extension_popup", { url, x: x ?? null, y: y ?? null }),
+  showExtensionPopup: (extensionId: string, x?: number, y?: number) =>
+    invoke<void>("show_extension_popup", { extensionId, x: x ?? null, y: y ?? null }),
+  openExtensionOptions: (extensionId: string) =>
+    invoke<AppSnapshot>("open_extension_options", { extensionId }),
   toggleExtensionPin: (extensionId: string, pinned: boolean) =>
     invoke<AppSnapshot>("toggle_extension_pin", { extensionId, pinned }),
   checkUpdate: () => invoke<UpdateInfo | null>("check_update"),

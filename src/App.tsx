@@ -158,7 +158,7 @@ function App() {
       if (next.locked) return "lock";
       if (current === "lock" && !next.firstRun) return "newtab";
       if (
-        activeUrl === "quickpane://newtab" &&
+        (activeUrl === "quickpane://newtab" || activeUrl?.startsWith("chrome-extension://")) &&
         lastActiveUrl.current !== activeUrl
       ) {
         return "newtab";
@@ -616,7 +616,7 @@ function App() {
                   if (!extension.popupUrl) return;
                   void run(() =>
                     api.showExtensionPopup(
-                      extension.popupUrl as string,
+                      extension.id,
                       anchor.x,
                       anchor.y,
                     ),
@@ -704,8 +704,8 @@ function App() {
                       run={run}
                       applySnapshot={applySnapshot}
                       pinnedIds={snapshot.data.settings.pinnedExtensions ?? []}
-                      onOpen={(url) =>
-                        void run(() => api.showExtensionPopup(url))
+                      onOpen={(extensionId) =>
+                        void run(() => api.showExtensionPopup(extensionId))
                       }
                     />
                   ) : section === "tabs" ? (

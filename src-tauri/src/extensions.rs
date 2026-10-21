@@ -11,6 +11,277 @@ use uuid::Uuid;
 
 use crate::browser::extensions_dir;
 
+pub const BUILTIN_ID: &str = "violentmonkey";
+
+/// 仅首次安装随包版本；尊重用户禁用或卸载，避免每次启动重新安装。
+pub fn install_builtin(app: &AppHandle) -> Result<bool, String> {
+    let root = app
+        .path()
+        .app_data_dir()
+        .map_err(|error| error.to_string())?;
+    let marker = root.join("violentmonkey-installed");
+    if marker.exists() {
+        return Ok(false);
+    }
+    let target = ext_dir(app, BUILTIN_ID)?;
+    if !target.exists() && !ext_disabled_dir(app, BUILTIN_ID)?.exists() {
+        let source = app
+            .path()
+            .resolve(
+                "resources/violentmonkey",
+                tauri::path::BaseDirectory::Resource,
+            )
+            .map_err(|error| error.to_string())?;
+        if read_manifest(&source).is_none() {
+            return Err("内置油猴资源缺失".into());
+        }
+        copy_dir(&source, &target)?;
+    }
+    std::fs::write(marker, "2.49.0").map_err(|error| error.to_string())?;
+    Ok(true)
+}
+
+fn host_window(app: &AppHandle) -> Option<tauri::WebviewWindow> {
+    app.webviews()
+        .keys()
+        .find(|label| label.starts_with("extension-host-"))
+        .and_then(|label| app.get_webview_window(label))
+}
+
+/// 没有网页时也能检查扩展；宿主不显示、不承载远程网页。
+pub async fn ensure_loaded(app: &AppHandle) -> Result<(), String> {
+    static HOST_LOCK: tauri::async_runtime::Mutex<()> = tauri::async_runtime::Mutex::const_new(());
+    let _guard = HOST_LOCK.lock().await;
+    let host = match host_window(app) {
+        Some(host) => host,
+        None => {
+            let state = app.state::<crate::state::AppState>();
+            let args = {
+                let guard = state.inner.lock().map_err(|_| "应用状态无法读取")?;
+                crate::browser::proxy_browser_args(
+                    &guard.data.settings.proxy_mode,
+                    &guard.data.settings.proxy_url,
+                )
+            };
+            let mut builder = tauri::WebviewWindowBuilder::new(
+                app,
+                format!("extension-host-{}", Uuid::new_v4().simple()),
+                tauri::WebviewUrl::External("about:blank".parse().unwrap()),
+            )
+            .visible(false)
+            .focused(false)
+            .skip_taskbar(true)
+            .data_directory(crate::browser::browser_data_dir(app)?)
+            .browser_extensions_enabled(true);
+            if let Some(args) = args {
+                builder = builder.additional_browser_args(&args);
+            }
+            builder.build().map_err(|error| error.to_string())?
+        }
+    };
+    load_profile(app, host.as_ref()).await
+}
+
+/// 只打开已安装扩展声明的页面；不信任前端拼接的 chrome-extension 地址。
+pub fn page_url(app: &AppHandle, id: &str, options: bool) -> Result<url::Url, String> {
+    let info = list(app)
+        .into_iter()
+        .find(|info| info.id == id && info.enabled)
+        .ok_or("扩展未启用")?;
+    if let Some(error) = info.load_error {
+        return Err(format!("扩展加载失败：{error}"));
+    }
+    let url = if options {
+        info.options_url
+    } else {
+        info.popup_url
+    }
+    .ok_or("扩展未提供该页面")?;
+    url.parse().map_err(|_| "扩展页面地址无效".into())
+}
+
+/// WebView2 返回的运行时 ID 才能用于导航；目录哈希只用作本地安装标识。
+#[derive(Clone)]
+struct LoadedExtension {
+    id: String,
+    error: Option<String>,
+}
+static LOADED: std::sync::LazyLock<
+    std::sync::Mutex<std::collections::HashMap<String, LoadedExtension>>,
+> = std::sync::LazyLock::new(Default::default);
+
+#[cfg(windows)]
+pub async fn load_profile(app: &AppHandle, webview: &tauri::Webview) -> Result<(), String> {
+    use webview2_com::Microsoft::Web::WebView2::Win32::{ICoreWebView2Profile7, ICoreWebView2_13};
+    use webview2_com::{take_pwstr, ProfileAddBrowserExtensionCompletedHandler};
+    use windows::core::{Interface, HSTRING, PWSTR};
+
+    static LOAD_LOCK: tauri::async_runtime::Mutex<()> = tauri::async_runtime::Mutex::const_new(());
+    let _guard = LOAD_LOCK.lock().await;
+    for info in list(app).into_iter().filter(|info| info.enabled) {
+        if LOADED
+            .lock()
+            .map_err(|_| "扩展状态无法读取")?
+            .get(&info.id)
+            .is_some_and(|value| value.error.is_none())
+        {
+            continue;
+        }
+        let path = ext_dir(app, &info.id)?;
+        let (sender, receiver) = std::sync::mpsc::sync_channel(1);
+        webview
+            .with_webview(move |platform| {
+                let result = (|| -> windows::core::Result<()> {
+                    // 回调必须留在 UI 线程，异步只传递普通字符串，不跨线程传 COM 对象。
+                    unsafe {
+                        let core = platform
+                            .controller()
+                            .CoreWebView2()?
+                            .cast::<ICoreWebView2_13>()?;
+                        let profile = core.Profile()?.cast::<ICoreWebView2Profile7>()?;
+                        let callback_sender = sender.clone();
+                        let handler = ProfileAddBrowserExtensionCompletedHandler::create(Box::new(
+                            move |error, extension| {
+                                let result = error
+                                    .and_then(|_| {
+                                        let extension = extension.ok_or_else(|| {
+                                            windows::core::Error::from_hresult(
+                                                windows::core::HRESULT(0x80004005u32 as i32),
+                                            )
+                                        })?;
+                                        let mut id = PWSTR::null();
+                                        extension.Id(&mut id)?;
+                                        Ok(take_pwstr(id))
+                                    })
+                                    .map_err(|error| error.to_string());
+                                let _ = callback_sender.try_send(result);
+                                Ok(())
+                            },
+                        ));
+                        profile.AddBrowserExtension(&HSTRING::from(path.as_path()), &handler)?;
+                    }
+                    Ok(())
+                })();
+                if let Err(error) = result {
+                    let _ = sender.try_send(Err(error.to_string()));
+                }
+            })
+            .map_err(|error| error.to_string())?;
+        let result = tauri::async_runtime::spawn_blocking(move || {
+            receiver.recv_timeout(std::time::Duration::from_secs(15))
+        })
+        .await
+        .map_err(|error| error.to_string())?
+        .map_err(|_| "扩展加载超时，请重新检查")?;
+        let loaded = match result {
+            Ok(id) => LoadedExtension { id, error: None },
+            Err(error) => LoadedExtension {
+                id: String::new(),
+                error: Some(error),
+            },
+        };
+        LOADED
+            .lock()
+            .map_err(|_| "扩展状态无法读取")?
+            .insert(info.id, loaded);
+    }
+    crate::browser::emit_snapshot(app);
+    Ok(())
+}
+/// 目录移动不会停止已注册扩展，还会改变无 key 扩展的 ID；启停必须调用原生 Profile。
+pub async fn update_runtime(
+    app: &AppHandle,
+    id: &str,
+    enabled: Option<bool>,
+) -> Result<(), String> {
+    use webview2_com::Microsoft::Web::WebView2::Win32::{ICoreWebView2Profile7, ICoreWebView2_13};
+    use webview2_com::{
+        take_pwstr, BrowserExtensionEnableCompletedHandler, BrowserExtensionRemoveCompletedHandler,
+        ProfileGetBrowserExtensionsCompletedHandler,
+    };
+    use windows::core::{Interface, PWSTR};
+    ensure_loaded(app).await?;
+    let runtime_id = LOADED
+        .lock()
+        .map_err(|_| "扩展状态无法读取")?
+        .get(id)
+        .map(|value| value.id.clone())
+        .unwrap_or_default();
+    if runtime_id.is_empty() {
+        return Ok(());
+    }
+    let host = host_window(app).ok_or("扩展宿主不存在")?;
+    let (sender, receiver) = std::sync::mpsc::sync_channel(1);
+    host.with_webview(move |platform| {
+        let result = (|| -> windows::core::Result<()> {
+            unsafe {
+                let profile = platform
+                    .controller()
+                    .CoreWebView2()?
+                    .cast::<ICoreWebView2_13>()?
+                    .Profile()?
+                    .cast::<ICoreWebView2Profile7>()?;
+                let callback_sender = sender.clone();
+                let handler = ProfileGetBrowserExtensionsCompletedHandler::create(Box::new(
+                    move |error, list| {
+                        let result = (|| -> windows::core::Result<()> {
+                            error?;
+                            let list = list.ok_or_else(windows::core::Error::empty)?;
+                            let mut count = 0;
+                            list.Count(&mut count)?;
+                            for index in 0..count {
+                                let extension = list.GetValueAtIndex(index)?;
+                                let mut actual = PWSTR::null();
+                                extension.Id(&mut actual)?;
+                                if take_pwstr(actual) != runtime_id {
+                                    continue;
+                                }
+                                let tx = callback_sender.clone();
+                                if let Some(enabled) = enabled {
+                                    let handler = BrowserExtensionEnableCompletedHandler::create(
+                                        Box::new(move |result| {
+                                            let _ = tx.try_send(result.map_err(|e| e.to_string()));
+                                            Ok(())
+                                        }),
+                                    );
+                                    extension.Enable(enabled, &handler)?;
+                                } else {
+                                    let handler = BrowserExtensionRemoveCompletedHandler::create(
+                                        Box::new(move |result| {
+                                            let _ = tx.try_send(result.map_err(|e| e.to_string()));
+                                            Ok(())
+                                        }),
+                                    );
+                                    extension.Remove(&handler)?;
+                                }
+                                return Ok(());
+                            }
+                            let _ = callback_sender.try_send(Ok(()));
+                            Ok(())
+                        })();
+                        if let Err(error) = result {
+                            let _ = callback_sender.try_send(Err(error.to_string()));
+                        }
+                        Ok(())
+                    },
+                ));
+                profile.GetBrowserExtensions(&handler)?;
+                Ok(())
+            }
+        })();
+        if let Err(error) = result {
+            let _ = sender.try_send(Err(error.to_string()));
+        }
+    })
+    .map_err(|error| error.to_string())?;
+    tauri::async_runtime::spawn_blocking(move || {
+        receiver.recv_timeout(std::time::Duration::from_secs(15))
+    })
+    .await
+    .map_err(|error| error.to_string())?
+    .map_err(|_| "扩展操作超时，请重试")?
+}
+
 /// 已安装扩展的展示信息，从磁盘上的 manifest.json 实时解析。
 #[derive(Debug, Clone, Serialize)]
 #[serde(rename_all = "camelCase")]
@@ -23,9 +294,12 @@ pub struct ExtInfo {
     pub enabled: bool,
     /// 图标的 data URL（避免前端依赖 asset protocol），解析失败为 None。
     pub icon: Option<String>,
-    /// action/browser_action 的 default_popup，Webview2 无弹出面板宿主，
-    /// 由前端用该 URL 在标签页中打开面板页面。
+    /// 已由 WebView2 确认的面板地址。
     pub popup_url: Option<String>,
+    pub load_error: Option<String>,
+    pub options_url: Option<String>,
+    pub builtin: bool,
+    pub loaded: bool,
 }
 
 /// 按 Chromium 规则推导扩展 ID：manifest 带 `key`（商店来源解包后常见）时用
@@ -64,13 +338,15 @@ fn manifest_popup(extension_id: &str, manifest: &serde_json::Value) -> Option<St
         .get("action")
         .or_else(|| manifest.get("browser_action"))?;
     let popup = action.get("default_popup")?.as_str()?;
-    Some(format!(
-        "chrome-extension://{extension_id}/{}",
-        popup.trim_start_matches('/')
-    ))
+    extension_page(extension_id, popup)
+}
+fn extension_page(id: &str, path: &str) -> Option<String> {
+    let base = url::Url::parse(&format!("chrome-extension://{id}/")).ok()?;
+    let url = base.join(path).ok()?;
+    (url.scheme() == "chrome-extension" && url.host_str() == Some(id)).then(|| url.to_string())
 }
 
-/// wry 会加载扩展目录下的每一个子文件夹，禁用即移动到旁边的隔离目录。
+/// 禁用标记与旧版隔离目录；保持兼容已安装扩展。
 fn disabled_dir(app: &AppHandle) -> Result<PathBuf, String> {
     let path = app
         .path()
@@ -119,8 +395,19 @@ fn info_from_dir(path: &Path, enabled: bool) -> Option<ExtInfo> {
         return None;
     }
     let manifest = read_manifest(path)?;
-    let extension_id = compute_extension_id(path, &manifest);
     let id = path.file_name()?.to_string_lossy().to_string();
+    let enabled = enabled
+        && !path
+            .parent()?
+            .parent()?
+            .join("ExtensionsDisabled")
+            .join(format!("{id}.disabled"))
+            .exists();
+    let loaded = LOADED.lock().ok()?.get(&id).cloned();
+    let extension_id = loaded
+        .as_ref()
+        .map(|loaded| loaded.id.clone())
+        .unwrap_or_else(|| compute_extension_id(path, &manifest));
     Some(ExtInfo {
         name: resolve_message(path, manifest.get("name")?.as_str()?).unwrap_or_else(|| id.clone()),
         version: manifest
@@ -135,6 +422,15 @@ fn info_from_dir(path: &Path, enabled: bool) -> Option<ExtInfo> {
             .unwrap_or_default(),
         icon: manifest_icon(path, &manifest),
         popup_url: manifest_popup(&extension_id, &manifest),
+        options_url: manifest
+            .get("options_ui")
+            .and_then(|value| value.get("page"))
+            .or_else(|| manifest.get("options_page"))
+            .and_then(|value| value.as_str())
+            .and_then(|path| extension_page(&extension_id, path)),
+        builtin: id == BUILTIN_ID,
+        loaded: enabled && loaded.as_ref().is_some_and(|value| value.error.is_none()),
+        load_error: loaded.and_then(|loaded| loaded.error),
         id,
         enabled,
     })
@@ -156,6 +452,7 @@ pub fn pinned_infos(data_dir: &Path, ids: &[String]) -> Vec<ExtInfo> {
     ids.iter()
         .filter(|id| sanitize_id(id).is_ok())
         .filter_map(|id| info_from_dir(&data_dir.join("Extensions").join(id), true))
+        .filter(|info| info.enabled)
         .collect()
 }
 
@@ -365,11 +662,18 @@ pub fn install_from_folder(app: &AppHandle, folder: &Path) -> Result<Vec<ExtInfo
     if had_existing {
         let _ = std::fs::remove_dir_all(&backup);
     }
+    LOADED.lock().map_err(|_| "扩展状态无法读取")?.remove(&id);
     Ok(list(app))
 }
 
 /// 卸载：同时清理启用与禁用两处的目录。
 pub fn remove(app: &AppHandle, id: &str) -> Result<Vec<ExtInfo>, String> {
+    sanitize_id(id)?;
+    LOADED.lock().map_err(|_| "扩展状态无法读取")?.remove(id);
+    let marker = disabled_dir(app)?.join(format!("{id}.disabled"));
+    if marker.exists() {
+        std::fs::remove_file(marker).map_err(|error| error.to_string())?;
+    }
     for path in [ext_dir(app, id)?, ext_disabled_dir(app, id)?] {
         if path.exists() {
             std::fs::remove_dir_all(path).map_err(|error| error.to_string())?;
@@ -378,20 +682,22 @@ pub fn remove(app: &AppHandle, id: &str) -> Result<Vec<ExtInfo>, String> {
     Ok(list(app))
 }
 
-/// 启用/禁用通过在两个目录间移动文件夹实现，wry 只加载扩展目录。
+/// 用旁路标记记录禁用，不移动扩展目录，保持扩展 ID 和脚本数据。
 pub fn set_enabled(app: &AppHandle, id: &str, enabled: bool) -> Result<Vec<ExtInfo>, String> {
-    let (from, to) = if enabled {
-        (ext_disabled_dir(app, id)?, ext_dir(app, id)?)
+    sanitize_id(id)?;
+    let marker = disabled_dir(app)?.join(format!("{id}.disabled"));
+    if enabled {
+        let legacy = ext_disabled_dir(app, id)?;
+        let target = ext_dir(app, id)?;
+        if legacy.exists() && !target.exists() {
+            std::fs::rename(legacy, target).map_err(|error| error.to_string())?;
+        }
+        if marker.exists() {
+            std::fs::remove_file(marker).map_err(|error| error.to_string())?;
+        }
     } else {
-        (ext_dir(app, id)?, ext_disabled_dir(app, id)?)
-    };
-    if !from.exists() {
-        return Ok(list(app));
+        std::fs::write(marker, "disabled").map_err(|error| error.to_string())?;
     }
-    if to.exists() {
-        std::fs::remove_dir_all(&to).map_err(|error| error.to_string())?;
-    }
-    std::fs::rename(&from, &to).map_err(|error| error.to_string())?;
     Ok(list(app))
 }
 
@@ -408,5 +714,36 @@ mod tests {
         assert!(!is_safe_locale(r"..\secret"));
         assert!(!is_safe_locale("C:\\secret"));
         assert!(!is_safe_locale(""));
+    }
+    #[test]
+    fn extension_page_cannot_escape_its_origin() {
+        assert_eq!(
+            super::extension_page("abcdefghijklmnop", "popup/index.html").as_deref(),
+            Some("chrome-extension://abcdefghijklmnop/popup/index.html")
+        );
+        assert!(super::extension_page("abcdefghijklmnop", "https://example.com/").is_none());
+        assert!(super::extension_page("abcdefghijklmnop", "//other/options.html").is_none());
+    }
+
+    #[test]
+    fn disabled_extension_keeps_its_path_and_id() {
+        let root =
+            std::env::temp_dir().join(format!("quickpane-extension-{}", uuid::Uuid::new_v4()));
+        let ext = root.join("Extensions/test");
+        std::fs::create_dir_all(&ext).unwrap();
+        std::fs::create_dir_all(root.join("ExtensionsDisabled")).unwrap();
+        std::fs::write(
+            ext.join("manifest.json"),
+            r#"{"name":"Test","version":"1","action":{"default_popup":"popup.html"}}"#,
+        )
+        .unwrap();
+        let before = super::info_from_dir(&ext, true).unwrap();
+        std::fs::write(root.join("ExtensionsDisabled/test.disabled"), "disabled").unwrap();
+        let after = super::info_from_dir(&ext, true).unwrap();
+        assert!(before.enabled);
+        assert!(!after.enabled);
+        assert_eq!(before.popup_url, after.popup_url);
+        assert!(super::pinned_infos(&root, &["test".into()]).is_empty());
+        std::fs::remove_dir_all(root).unwrap();
     }
 }

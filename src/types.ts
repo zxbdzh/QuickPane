@@ -72,8 +72,12 @@ export type BrowserExtension = {
   description: string;
   enabled: boolean;
   icon: string | null;
-  /** 声明了 default_popup 时的面板页 URL（在标签页中打开，WebView2 无弹出宿主） */
+  /** 运行时确认的扩展页面，打开时由后端按 id 再校验。 */
   popupUrl: string | null;
+  optionsUrl: string | null;
+  builtin: boolean;
+  loaded: boolean;
+  loadError: string | null;
 };
 
 export type Settings = {

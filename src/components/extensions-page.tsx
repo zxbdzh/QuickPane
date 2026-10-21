@@ -20,7 +20,7 @@ import { Switch } from "./ui/switch";
 /** 扩展管理页：安装/启停/卸载/固定未打包的 Chrome/Edge 扩展。 */
 function ExtensionsPage({ run, onOpen, pinnedIds, applySnapshot }: {
   run: <T>(action: () => Promise<T>) => Promise<T | undefined>;
-  onOpen: (url: string) => void;
+  onOpen: (extensionId: string) => void;
   pinnedIds: string[];
   applySnapshot: (value: AppSnapshot) => void;
 }) {
@@ -50,18 +50,22 @@ function ExtensionsPage({ run, onOpen, pinnedIds, applySnapshot }: {
   };
 
   return (
-    <div className="mx-auto w-full max-w-[880px] px-6 pt-7 pb-16">
+    <div className="mx-auto w-full px-6 pt-7 pb-16">
       <header className="flex items-end justify-between gap-4 pb-4">
         <div>
-          <h1 className="text-xl font-semibold">扩展</h1>
+          <h1 className="text-lg font-semibold">扩展</h1>
           <p className="mt-0.5 text-xs text-muted-foreground">
-            安装未打包的 Chrome/Edge 扩展文件夹，更改后已打开的页面会重新加载。
+            已内置油猴脚本管理器；也可添加 Chrome/Edge 扩展文件夹。
           </p>
         </div>
         <Button variant="ghost" size="sm" disabled={pendingAction !== null} className="text-primary hover:bg-soft hover:text-primary" onClick={install}>
           <Plus className="size-4" />添加扩展
         </Button>
       </header>
+      <div className="mb-4 flex items-center justify-between border-b border-border pb-3 text-xs text-muted-foreground">
+        <span>{extensions?.length ?? 0} 个扩展 · {extensions?.filter(item => item.enabled && item.loaded).length ?? 0} 个已加载</span>
+        <Button variant="ghost" size="sm" disabled={pendingAction !== null} onClick={load}>重新检查</Button>
+      </div>
 
       {extensions === null ? loadError ? (
         <div role="alert" className="grid place-items-center gap-3 rounded-lg border border-dashed border-destructive-border py-20 text-center">
@@ -93,7 +97,7 @@ function ExtensionsPage({ run, onOpen, pinnedIds, applySnapshot }: {
           {extensions.map((extension) => (
             <div
               className={cn(
-                "flex items-center gap-3 rounded-lg border border-border bg-surface px-4 py-3",
+                "flex flex-wrap items-center gap-3 rounded-lg border border-border bg-surface px-4 py-3",
                 !extension.enabled && "opacity-50",
               )}
               key={extension.id}
@@ -107,25 +111,36 @@ function ExtensionsPage({ run, onOpen, pinnedIds, applySnapshot }: {
               )}
               <div className="min-w-0 flex-1">
                 <p className="truncate text-sm font-medium">
-                  {extension.name}
+                  {extension.builtin ? "暴力猴 · 油猴脚本" : extension.name}
+                  {extension.builtin && <span className="ml-2 text-xs text-muted-foreground">内置</span>}
                   <span className="ml-2 text-xs text-muted-foreground">{extension.version}</span>
                 </p>
                 {extension.description ? (
-                  <p className="truncate text-xs text-muted-foreground">{extension.description}</p>
+                  <p className="truncate text-xs text-muted-foreground">{extension.builtin ? "安装和管理用户脚本，支持自动匹配网站、脚本启停与数据保存。" : extension.description}</p>
                 ) : null}
+                <p className={cn("mt-1 text-xs", extension.loadError ? "text-destructive" : "text-muted-foreground")} role={extension.loadError ? "alert" : undefined}>
+                  {!extension.enabled ? "已停用" : extension.loadError ? `加载失败：${extension.loadError}` : extension.loaded ? "已加载" : "待加载"}
+                </p>
               </div>
-              {extension.popupUrl && extension.enabled ? (
+              {extension.popupUrl && extension.enabled && !extension.loadError ? (
                 <Button
                   variant="ghost"
                   size="sm"
                   aria-label={`打开 ${extension.name} 面板`}
-                  title="在置顶小窗中打开扩展面板"
+                  title={extension.builtin ? "打开油猴脚本管理" : "在小窗中打开扩展面板"}
                   className="shrink-0 text-primary hover:bg-soft hover:text-primary"
-                  onClick={() => onOpen(extension.popupUrl as string)}
+                  onClick={() => extension.builtin
+                    ? void run(() => api.openExtensionOptions(extension.id)).then(next => { if (next) applySnapshot(next); })
+                    : onOpen(extension.id)}
                 >
-                  <SquareArrowOutUpRight className="size-4" />打开面板
+                  <SquareArrowOutUpRight className="size-4" />{extension.builtin ? "管理脚本" : "打开面板"}
                 </Button>
               ) : null}
+              {extension.optionsUrl && extension.enabled && !extension.loadError && !extension.builtin && (
+                <Button variant="ghost" size="sm" onClick={() => void run(() => api.openExtensionOptions(extension.id)).then(next => { if (next) applySnapshot(next); })}>
+                  设置
+                </Button>
+              )}
               <Button
                 variant="ghost"
                 size="iconSm"

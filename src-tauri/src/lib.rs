@@ -10,10 +10,10 @@ use std::time::Duration;
 
 use browser::{
     activate_tab, browser_data_dir, close_tab, create_tab, emit_snapshot, ensure_tab_webview,
-    eval_active, extensions_dir, hibernate_idle_tabs, navigate_tab, proxy_browser_args,
-    recreate_tab_webviews, reload_active, resize_tabs,
-    restore_closed_tab as restore_closed_tab_record, set_all_muted, set_shell_mode,
-    set_tab_muted as set_tab_muted_record, set_tab_pinned as set_tab_pinned_record, set_zoom,
+    eval_active, hibernate_idle_tabs, navigate_tab, proxy_browser_args, recreate_tab_webviews,
+    reload_active, resize_tabs, restore_closed_tab as restore_closed_tab_record, set_all_muted,
+    set_shell_mode, set_tab_muted as set_tab_muted_record, set_tab_pinned as set_tab_pinned_record,
+    set_zoom,
 };
 use chrono::Utc;
 use serde::Deserialize;
@@ -528,8 +528,9 @@ async fn update_settings(
 }
 
 #[tauri::command]
-fn list_extensions(app: AppHandle) -> Result<Vec<extensions::ExtInfo>, String> {
+async fn list_extensions(app: AppHandle) -> Result<Vec<extensions::ExtInfo>, String> {
     require_unlocked(&app)?;
+    extensions::ensure_loaded(&app).await?;
     Ok(extensions::list(&app))
 }
 
@@ -678,10 +679,11 @@ async fn install_extension(app: AppHandle) -> Result<Vec<extensions::ExtInfo>, S
         return Ok(extensions::list(&app));
     };
     require_unlocked(&app)?;
-    let items = extensions::install_from_folder(&app, &folder)?;
+    extensions::install_from_folder(&app, &folder)?;
     require_unlocked(&app)?;
+    extensions::ensure_loaded(&app).await?;
     recreate_tab_webviews(&app).await?;
-    Ok(items)
+    Ok(extensions::list(&app))
 }
 
 #[tauri::command]
@@ -690,10 +692,12 @@ async fn remove_extension(
     extension_id: String,
 ) -> Result<Vec<extensions::ExtInfo>, String> {
     require_unlocked(&app)?;
-    let items = extensions::remove(&app, &extension_id)?;
+    extensions::check_id(&extension_id)?;
+    extensions::update_runtime(&app, &extension_id, None).await?;
+    extensions::remove(&app, &extension_id)?;
     require_unlocked(&app)?;
     recreate_tab_webviews(&app).await?;
-    Ok(items)
+    Ok(extensions::list(&app))
 }
 
 #[tauri::command]
@@ -703,15 +707,37 @@ async fn set_extension_enabled(
     enabled: bool,
 ) -> Result<Vec<extensions::ExtInfo>, String> {
     require_unlocked(&app)?;
-    let items = extensions::set_enabled(&app, &extension_id, enabled)?;
+    extensions::check_id(&extension_id)?;
+    if !enabled {
+        extensions::update_runtime(&app, &extension_id, Some(false)).await?;
+    }
+    extensions::set_enabled(&app, &extension_id, enabled)?;
+    if enabled {
+        extensions::update_runtime(&app, &extension_id, Some(true)).await?;
+    }
     require_unlocked(&app)?;
     recreate_tab_webviews(&app).await?;
-    Ok(items)
+    Ok(extensions::list(&app))
 }
 
 /// 扩展面板小窗最近一次显示的时刻，用于忽略创建瞬间的焦点抖动。
 static EXTENSION_POPUP_SHOWN_AT: std::sync::Mutex<Option<std::time::Instant>> =
     std::sync::Mutex::new(None);
+
+#[tauri::command]
+async fn open_extension_options(
+    app: AppHandle,
+    extension_id: String,
+) -> Result<AppSnapshot, String> {
+    require_unlocked(&app)?;
+    extensions::ensure_loaded(&app).await?;
+    require_unlocked(&app)?;
+    let mut url = extensions::page_url(&app, &extension_id, true)?;
+    if extension_id == extensions::BUILTIN_ID {
+        url.set_fragment(Some("scripts"));
+    }
+    create_tab(&app, Some(url.to_string()), true)
+}
 
 /// 在置顶小窗中打开扩展面板（chrome-extension:// 页面）。
 /// WebView2 没有工具栏弹出面板的宿主，用与标签页相同 WebView2 环境的独立窗口承载。
@@ -719,15 +745,14 @@ static EXTENSION_POPUP_SHOWN_AT: std::sync::Mutex<Option<std::time::Instant>> =
 #[tauri::command]
 async fn show_extension_popup(
     app: AppHandle,
-    url: String,
+    extension_id: String,
     x: Option<f64>,
     y: Option<f64>,
 ) -> Result<(), String> {
     require_unlocked(&app)?;
-    let parsed = Url::parse(&url).map_err(|_| "扩展面板地址无效".to_string())?;
-    if parsed.scheme() != "chrome-extension" {
-        return Err("仅支持扩展面板地址".into());
-    }
+    extensions::ensure_loaded(&app).await?;
+    require_unlocked(&app)?;
+    let parsed = extensions::page_url(&app, &extension_id, false)?;
     let main = app
         .get_window("main")
         .ok_or_else(|| "主窗口不存在".to_string())?;
@@ -757,6 +782,16 @@ async fn show_extension_popup(
         *EXTENSION_POPUP_SHOWN_AT
             .lock()
             .map_err(|_| "扩展弹窗状态异常".to_string())? = Some(std::time::Instant::now());
+        popup
+            .set_size(tauri::LogicalSize::new(
+                400.0,
+                if extension_id == extensions::BUILTIN_ID {
+                    360.0
+                } else {
+                    620.0
+                },
+            ))
+            .map_err(|error| error.to_string())?;
         popup.navigate(parsed).map_err(|error| error.to_string())?;
         let _ = popup.set_position(position);
         let _ = popup.show();
@@ -781,10 +816,17 @@ async fn show_extension_popup(
     let mut builder = tauri::WebviewWindowBuilder::new(
         &app,
         "extension-popup",
-        tauri::WebviewUrl::External(parsed),
+        tauri::WebviewUrl::External(Url::parse("about:blank").unwrap()),
     )
     .title("扩展面板")
-    .inner_size(400.0, 620.0)
+    .inner_size(
+        400.0,
+        if extension_id == extensions::BUILTIN_ID {
+            360.0
+        } else {
+            620.0
+        },
+    )
     .position(position.x, position.y)
     .decorations(false)
     .always_on_top(true)
@@ -792,12 +834,45 @@ async fn show_extension_popup(
     .resizable(false)
     .focused(true)
     .data_directory(data_dir)
-    .browser_extensions_enabled(true)
-    .extensions_path(extensions_dir(&app));
+    .browser_extensions_enabled(true);
     if let Some(args) = &proxy_args {
         builder = builder.additional_browser_args(args);
     }
+    let app_for_navigation = app.clone();
+    builder = builder.on_navigation(move |url| {
+        let builtin_host =
+            extensions::page_url(&app_for_navigation, extensions::BUILTIN_ID, false).ok();
+        if builtin_host
+            .as_ref()
+            .is_some_and(|builtin| builtin.host_str() == url.host_str())
+            && (url.path().starts_with("/options/") || url.path().starts_with("/confirm/"))
+        {
+            let app = app_for_navigation.clone();
+            let url = url.to_string();
+            tauri::async_runtime::spawn(async move {
+                if require_unlocked(&app).is_ok() {
+                    let _ = create_tab(&app, Some(url), true);
+                }
+            });
+            return false;
+        }
+        true
+    });
+    builder = builder.on_new_window({
+        let app = app.clone();
+        move |url, _features| {
+            // WebView2 事件里同步创建窗口会死锁，交给异步命令处理。
+            let app = app.clone();
+            tauri::async_runtime::spawn(async move {
+                let _ = create_tab(&app, Some(url.to_string()), true);
+            });
+            tauri::webview::NewWindowResponse::Deny
+        }
+    });
     let popup = builder.build().map_err(|error| error.to_string())?;
+    extensions::load_profile(&app, popup.as_ref()).await?;
+    // 先确认注册完成再首次导航，避免扩展页被当成不存在的资源拦截。
+    popup.navigate(parsed).map_err(|error| error.to_string())?;
     *EXTENSION_POPUP_SHOWN_AT
         .lock()
         .map_err(|_| "扩展弹窗状态异常".to_string())? = Some(std::time::Instant::now());
@@ -1144,6 +1219,7 @@ fn register_commands(builder: tauri::Builder<tauri::Wry>) -> tauri::Builder<taur
         skip_password_setup,
         lock_now,
         list_extensions,
+        open_extension_options,
         install_extension,
         remove_extension,
         set_extension_enabled,
@@ -1201,6 +1277,16 @@ pub fn run() {
         .setup(|app| {
             let handle = app.handle().clone();
             let state = AppState::load(&handle).map_err(std::io::Error::other)?;
+            if extensions::install_builtin(&handle).map_err(std::io::Error::other)? {
+                state
+                    .mutate(|runtime| {
+                        let id = extensions::BUILTIN_ID.to_string();
+                        if !runtime.data.settings.pinned_extensions.contains(&id) {
+                            runtime.data.settings.pinned_extensions.push(id);
+                        }
+                    })
+                    .map_err(std::io::Error::other)?;
+            }
             let configured_shortcut = state
                 .inner
                 .lock()

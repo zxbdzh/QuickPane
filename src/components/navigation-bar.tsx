@@ -428,7 +428,7 @@ function NavigationBar({ activeTab, address, onAddress, onSubmit, addressRef, su
             type="button"
             key={extension.id}
             title={extension.name}
-            aria-label={`打开 ${extension.name} 面板`}
+            aria-label={extension.builtin ? "打开油猴脚本面板" : `打开 ${extension.name} 面板`}
             onClick={(event) => {
               const rect = event.currentTarget.getBoundingClientRect();
               onExtensionClick(extension, { x: rect.left, y: rect.bottom + 4 });

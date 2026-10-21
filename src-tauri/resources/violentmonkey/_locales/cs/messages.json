@@ -1,0 +1,866 @@
+{
+  "buttonApply": {
+    "message": "Použít"
+  },
+  "buttonCancel": {
+    "message": "Zrušit"
+  },
+  "buttonClose": {
+    "message": "Zavřít"
+  },
+  "buttonDisable": {
+    "message": "Vypnout"
+  },
+  "buttonEdit": {
+    "message": "Upravit"
+  },
+  "buttonEditClickHint": {
+    "message": "Můžete kliknout pravým myšítkem, s controlem nebo koleškem myši na jméno skriptu."
+  },
+  "buttonEmptyRecycleBin": {
+    "message": "Vysypat koš"
+  },
+  "buttonEnable": {
+    "message": "Zapnout"
+  },
+  "buttonExportData": {
+    "message": "Zálohovat do souboru ZIP"
+  },
+  "buttonHome": {
+    "message": "Domovská stránka"
+  },
+  "buttonImportData": {
+    "message": "Obnovit ze souboru ZIP"
+  },
+  "buttonInstallFromURL": {
+    "message": "Instalovat z URL"
+  },
+  "buttonNew": {
+    "message": "Nový"
+  },
+  "buttonNewFromFile": {
+    "message": "Nový ze souboru"
+  },
+  "buttonOK": {
+    "message": "OK"
+  },
+  "buttonRecycleBin": {
+    "message": "Odpadkový koš"
+  },
+  "buttonRemove": {
+    "message": "Odstranit"
+  },
+  "buttonReplace": {
+    "message": "Nahradit"
+  },
+  "buttonReplaceAll": {
+    "message": "Vše"
+  },
+  "buttonReset": {
+    "message": "Reset"
+  },
+  "buttonResetSettings": {
+    "message": "Obnovit nastavení"
+  },
+  "buttonRestore": {
+    "message": "Obnovit"
+  },
+  "buttonSave": {
+    "message": "Uložit"
+  },
+  "buttonSaveClose": {
+    "message": "Uložit a zavřít"
+  },
+  "buttonSaved": {
+    "message": "Uloženo"
+  },
+  "buttonShowEditorState": {
+    "message": "Ukázat stav editoru"
+  },
+  "buttonSupport": {
+    "message": "Stránka podpory"
+  },
+  "buttonSyncPullOnce": {
+    "message": "Pull once to local"
+  },
+  "buttonSyncPushOnce": {
+    "message": "Push once to remote"
+  },
+  "buttonUndo": {
+    "message": "Vrátit"
+  },
+  "buttonUpdate": {
+    "message": "Aktualizovat"
+  },
+  "buttonVacuum": {
+    "message": "Vyprázdnit data"
+  },
+  "buttonVacuumed": {
+    "message": "Data vyprázdněna"
+  },
+  "buttonVacuuming": {
+    "message": "Čištení dat..."
+  },
+  "confirmManualUpdate": {
+    "message": "Automatické aktualizace jsou vypnuté!\nZmáčkněte OK pro aktualizaci"
+  },
+  "confirmNotSaved": {
+    "message": "Úpravy nebyly uloženy!\nKlikni na OK pro zahození změn, nebo na zrušit pro setrvání na této stránce."
+  },
+  "confirmUndoImport": {
+    "message": "Vrátit všechny změny databáze (Importy, aktualizace, změny, přizpůsobení)"
+  },
+  "descBlacklist": {
+    "message": "URL matched in this list will not be injected by scripts."
+  },
+  "descBlacklistNet": {
+    "message": "Síťový blacklist (skript se nepřipojí k těmto stránkám nebo jejich cookies)"
+  },
+  "descCustomCSS": {
+    "message": "Custom CSS for options page and script installation page. If you are not sure what this is for, please do not edit it."
+  },
+  "descEditorOptions": {
+    "message": "Vlastní nastavení pro CodeMirror a doplňky v JSON objektech jako <code>{\"indentUnit\":2, \"smartIndent\":true}</code>ale některé nemusí fungovat ve ViolentMonkey. ref <a href=\"https://codemirror.net/doc/manual.html#config\" target=\"_blank\" rel=\"noopener noreferrer\">full list</a>"
+  },
+  "descEditorOptionsGeneric": {
+    "message": "Boolean nastavení může být přepnuto dvojtým kliknutím na hodnoty <code>true</code>= zapnuto <code>false</code> = vypnuto. Numerické nastavení končící <code>Delay</code>, <code>Interval</code>, <code>Rate</code>, <code>Time</code> jsou v milisekundách."
+  },
+  "descEditorOptionsVM": {
+    "message": "Nestandardní možnosti: <code>autocompleteOnTyping</code> je odezva v milisekundách pro zobrazení automatického doplňení nápověd (<code>0</code> = vypnuto), <code>killTrailingSpaceOnSave</code>automaticky odstraní mezery na konci řádků pri uložení. <code>showTrailingSpace</code>zobrazí koncové mezery jako tečky."
+  },
+  "descScriptTemplate": {
+    "message": "Podporované proměnné: <{{name}}>, <{{url}}>, <{{icon}}>, <{{date}}>, <{{date:format}}> s formátem kompatibilním MomentJS, např. <{{date:YYYY-MM-DD}}>."
+  },
+  "disabledScriptsGroup": {
+    "message": "Skupina"
+  },
+  "disabledScriptsHide": {
+    "message": "schovat"
+  },
+  "disabledScriptsSelector": {
+    "message": "Vypnuté skripty:"
+  },
+  "disabledScriptsShow": {
+    "message": "zobrazit"
+  },
+  "editHelpDocumentation": {
+    "message": "Dokumentace na bloku uživatelských metadat a <code>GM</code> API:"
+  },
+  "editHelpKeyboard": {
+    "message": "Klávesové zkratky:"
+  },
+  "editHowToHint": {
+    "message": "Použít jiný editor?"
+  },
+  "editLabelMeta": {
+    "message": "Vlastní metadata"
+  },
+  "editLabelSettings": {
+    "message": "Nastavení skritpu"
+  },
+  "editLongLine": {
+    "message": "Řádek je příliš dlouhý"
+  },
+  "editLongLineTooltip": {
+    "message": "Řádek je příliš dlouhý takže byl jeho text zhroucen aby se předešlo prodlevém při úpravách.\nMůžete upravit limit v pokročilém nastavení, například:\n\"maxDisplayLength\":20000"
+  },
+  "editNavCode": {
+    "message": "Code"
+  },
+  "editNavSettings": {
+    "message": "Nastavení"
+  },
+  "editNavValues": {
+    "message": "Hodnoty"
+  },
+  "editValueAllHint": {
+    "message": "Zobrazit/Upravit uložiště hodnot celého skriptu."
+  },
+  "extDescription": {
+    "message": "Správce uživatelských skriptů s otevřeným kódem, který podporuje spoustu prohlížečů"
+  },
+  "extName": {
+    "message": "Violentmonkey"
+  },
+  "failureReasonBlacklisted": {
+    "message": "Blacklistováno v nastavení ViolentMonkey"
+  },
+  "failureReasonNoninjectable": {
+    "message": "ViolentMonkey nemůže spustit skripty na této stránce\n(běžné příklady: UI prohlížeče, rozšíření, blokováno zásady, vyhledávací engine v Opeře)"
+  },
+  "failureReasonRestarted": {
+    "message": "Violentmonkey byl restartovén. Prosím znovu načtěte záložku."
+  },
+  "fileInstallBlocked": {
+    "message": "There are several methods to install or track edits in a local file: <1> Drag'n'drop the file into an open Violentmonkey page or popup, including this one. <2> Install a local HTTP server for this file and open it via http://localhost. <3> Enable \"Allow access to file URLs\" in details for Violentmonkey in chrome://extensions page. This is dangerous because any userscript may read any local file."
+  },
+  "fileInstallBlockedFF": {
+    "message": "Otevři about:addons, klikni \"Violentmonkey\", klikni \"Permissions and data\", povol \"Access local files on your computer\""
+  },
+  "filterAlphabeticalOrder": {
+    "message": "abecední"
+  },
+  "filterExecutionOrder": {
+    "message": "exekuční"
+  },
+  "filterLastUpdateOrder": {
+    "message": "čas poslední aktualizace"
+  },
+  "filterLastVisitOrder": {
+    "message": "čas poslední návštěvy"
+  },
+  "filterLastVisitOrderTooltip": {
+    "message": "Naposled co jsi navštívil stránku používanou tímto skriptem"
+  },
+  "filterSize": {
+    "message": "velikost"
+  },
+  "genericError": {
+    "message": "Chyba"
+  },
+  "genericOff": {
+    "message": "off"
+  },
+  "genericOn": {
+    "message": "on"
+  },
+  "genericUseGlobal": {
+    "message": "použij obecné nastavení"
+  },
+  "hashPatternWarning": {
+    "message": "\"#\" šablony fungují pouze při prvním otevřením stránky nebo při obnovením tabu: $1"
+  },
+  "headerRecycleBin": {
+    "message": "Odpadkový koš"
+  },
+  "helpForLocalFile": {
+    "message": "Zobraz pomoc když skript nemůže být nainstalován"
+  },
+  "hintForBatchAction": {
+    "message": "pro $1 vhodné skripty"
+  },
+  "hintGrantNone": {
+    "message": "`@grant none` vypne všechny ostatní `@grant` klíče"
+  },
+  "hintGrantless": {
+    "message": "A sandboxed script cannot change these global properties: $1.\nTo fix the script either add `@grant none` to disable the sandbox,\nor use `unsafeWindow` instead of `window`."
+  },
+  "hintInputURL": {
+    "message": "Adresa skriptu:"
+  },
+  "hintRecycleBin": {
+    "message": "Odstraněné skripty budou zde zobrazeny po dobu 7 dní."
+  },
+  "hintUseDownloadURL": {
+    "message": "Použít @downloadURL"
+  },
+  "hintVacuum": {
+    "message": "Zbavit se nadbytku a zkusit znovu načíst chybějící zdroje v mezipaměti."
+  },
+  "install": {
+    "message": "Instalovat"
+  },
+  "installFrom": {
+    "message": "Install from $1"
+  },
+  "installOptionTrackTooltip": {
+    "message": "The source file tab should be kept open in Firefox 68 and newer."
+  },
+  "labelAdvanced": {
+    "message": "Pokročilý"
+  },
+  "labelAllowUpdate": {
+    "message": "Povolit aktualizace"
+  },
+  "labelAuthor": {
+    "message": "Autor: "
+  },
+  "labelAutoReloadCurrentTab": {
+    "message": "Znovu načíst současný list po zapnutí či vypnutí skriptu z nabídky."
+  },
+  "labelAutoUpdate": {
+    "message": "Check for script updates every $1 day(s), use 0 to disable"
+  },
+  "labelBackup": {
+    "message": "Záloha"
+  },
+  "labelBackupMaintenance": {
+    "message": "Záloha a údržba"
+  },
+  "labelBadge": {
+    "message": "Badge:"
+  },
+  "labelBadgeColors": {
+    "message": "Badge colors: "
+  },
+  "labelBadgeNone": {
+    "message": "none"
+  },
+  "labelBadgeTotal": {
+    "message": "number of running scripts"
+  },
+  "labelBadgeUnique": {
+    "message": "number of unique running scripts"
+  },
+  "labelBlacklist": {
+    "message": "Blacklist"
+  },
+  "labelComment": {
+    "message": "Koment"
+  },
+  "labelContributors": {
+    "message": "Přispěvatelé"
+  },
+  "labelCurrentLang": {
+    "message": "Současný jazyk: "
+  },
+  "labelCustomCSS": {
+    "message": "Vlastní Styl"
+  },
+  "labelDownloadURL": {
+    "message": "Stažení (URL):"
+  },
+  "labelEditValue": {
+    "message": "Editing script value"
+  },
+  "labelEditValueAll": {
+    "message": "Editing script storage"
+  },
+  "labelEditor": {
+    "message": "Editor"
+  },
+  "labelEnabledScriptsOnly": {
+    "message": "enabled scripts only"
+  },
+  "labelExclude": {
+    "message": "Výjimky"
+  },
+  "labelExcludeMatch": {
+    "message": "@exclude-match rules"
+  },
+  "labelExportScriptData": {
+    "message": "Zálohovat data skriptu"
+  },
+  "labelExposeStatus": {
+    "message": "Expose installed version on userscript catalog sites: $1"
+  },
+  "labelFastInject": {
+    "message": "Alternative $1 mode"
+  },
+  "labelFastInjectHint": {
+    "message": "An alternative injection method for <document-start> scripts, faster than the default mode. Similarly to \"Synchronous page mode\" it also increases memory consumption, so you may want to disable it if your scripts work correctly without this option."
+  },
+  "labelFeedback": {
+    "message": "Zpětná vazba"
+  },
+  "labelFirefoxPatchCsp": {
+    "message": "Bypass CSP in Firefox"
+  },
+  "labelFirefoxPatchCspHint": {
+    "message": "Adds a random value to the CSP of webpages that only Violentmonkey can use to run scripts in the $1 injection mode, otherwise scripts have to be edited to use $2."
+  },
+  "labelFirefoxPatchCspPopup": {
+    "message": "Isolated $1 mode may limit functionality, see \"$2\" in the options."
+  },
+  "labelGmDownloadViaApi": {
+    "message": "Use browser download API"
+  },
+  "labelGmDownloadViaApiHint": {
+    "message": "Allows scripts to save files into subfolders inside your downloads directory and shows download progress in the browser's download bar."
+  },
+  "labelGrantPermission": {
+    "message": "Grant permission"
+  },
+  "labelHelpTranslate": {
+    "message": "Help with translation"
+  },
+  "labelHomepage": {
+    "message": "Domovská stránka"
+  },
+  "labelHomepageURL": {
+    "message": "Domovská stránka (URL):"
+  },
+  "labelHttpOnlyCookie": {
+    "message": "Allow GM_cookie to access HTTP-only cookies"
+  },
+  "labelHttpOnlyCookieHint": {
+    "message": "When enabled, scripts can read and write cookies with the HTTP-only flag. This allows scripts to access cookies that cannot be accessed via JavaScript. Use with caution as it may pose security risks."
+  },
+  "labelIconURL": {
+    "message": "Icon URL:"
+  },
+  "labelImportScriptData": {
+    "message": "Import script data"
+  },
+  "labelImportSettings": {
+    "message": "Nastavení importu"
+  },
+  "labelInclude": {
+    "message": "Zahrnout"
+  },
+  "labelInjectionMode": {
+    "message": "Injection mode: "
+  },
+  "labelInstall": {
+    "message": "Instaluji skript"
+  },
+  "labelKeepOriginal": {
+    "message": "Nech originál"
+  },
+  "labelLastUpdatedAt": {
+    "message": "Last updated at $1"
+  },
+  "labelLineNumber": {
+    "message": "Řádek číslo.: "
+  },
+  "labelMatch": {
+    "message": "Přiřazení"
+  },
+  "labelName": {
+    "message": "Jméno:"
+  },
+  "labelNoFrames": {
+    "message": "Run in frames: "
+  },
+  "labelNoName": {
+    "message": "Žádné jméno"
+  },
+  "labelNoSearchScripts": {
+    "message": "Žádný skript není nalezen"
+  },
+  "labelNotifyThisUpdated": {
+    "message": ", then notify:"
+  },
+  "labelNotifyUpdates": {
+    "message": "Oznamuj aktualizace skriptu"
+  },
+  "labelNotifyUpdatesGlobal": {
+    "message": "ignore per-script notification (\"settings\" tab in editor)"
+  },
+  "labelPageMenuCommands": {
+    "message": "Show script commands in page menu"
+  },
+  "labelPrivacyPolicy": {
+    "message": "Privacy Policy"
+  },
+  "labelReinstall": {
+    "message": "Re-installing script"
+  },
+  "labelRelated": {
+    "message": "Související odkazy: "
+  },
+  "labelRemovedAt": {
+    "message": "Removed at $1"
+  },
+  "labelReplace": {
+    "message": "Nahradit s: "
+  },
+  "labelRunAt": {
+    "message": "Spustit na: "
+  },
+  "labelRunAtDefault": {
+    "message": "(standardní)"
+  },
+  "labelScriptOptionRequired": {
+    "message": "(only for scripts with this option enabled in their settings)"
+  },
+  "labelScriptOptionRequiredGlobal": {
+    "message": "(this option must be also enabled in global settings)"
+  },
+  "labelScriptTemplate": {
+    "message": "Custom Script Template"
+  },
+  "labelSearch": {
+    "message": "Hledat: "
+  },
+  "labelSearchScript": {
+    "message": "Hledat skripty..."
+  },
+  "labelSettings": {
+    "message": "Nastavení"
+  },
+  "labelShowOrder": {
+    "message": "Show execution order positions"
+  },
+  "labelShowVisited": {
+    "message": "Show last visit time"
+  },
+  "labelSync": {
+    "message": "Sync"
+  },
+  "labelSyncAnonymous": {
+    "message": "Use anonymous account"
+  },
+  "labelSyncAuthorize": {
+    "message": "Autorizovat"
+  },
+  "labelSyncAuthorizing": {
+    "message": "Autorizování"
+  },
+  "labelSyncAutomatically": {
+    "message": "Sync automatically"
+  },
+  "labelSyncDisabled": {
+    "message": "Žádný"
+  },
+  "labelSyncPassword": {
+    "message": "Password: "
+  },
+  "labelSyncRevoke": {
+    "message": "Odvolat"
+  },
+  "labelSyncS3AccessKeyId": {
+    "message": "Access Key ID: "
+  },
+  "labelSyncS3Bucket": {
+    "message": "Bucket: "
+  },
+  "labelSyncS3Endpoint": {
+    "message": "Custom Endpoint: "
+  },
+  "labelSyncS3Prefix": {
+    "message": "Key Prefix: "
+  },
+  "labelSyncS3Region": {
+    "message": "Region: "
+  },
+  "labelSyncS3SecretAccessKey": {
+    "message": "Secret Access Key: "
+  },
+  "labelSyncScriptStatus": {
+    "message": "Synchrozuj status skriptu"
+  },
+  "labelSyncServerUrl": {
+    "message": "Server URL: "
+  },
+  "labelSyncService": {
+    "message": "Synchrozuj do"
+  },
+  "labelSyncUsername": {
+    "message": "Username: "
+  },
+  "labelTags": {
+    "message": "@tag / tags"
+  },
+  "labelTheme": {
+    "message": "Theme: "
+  },
+  "labelUpdateURL": {
+    "message": "Aktualizace (URL):"
+  },
+  "labelViewSingleColumn": {
+    "message": "Single column"
+  },
+  "labelViewTable": {
+    "message": "Table view"
+  },
+  "labelWidth": {
+    "message": "Width:"
+  },
+  "labelXhrInject": {
+    "message": "Synchronous $1 mode"
+  },
+  "labelXhrInjectHint": {
+    "message": "Enable only if you have a script that needs to run before the page starts loading and currently it's running too late. Just like Instant injection mode in Tampermonkey, this option is using the deprecated synchronous XHR, so in Chrome/Chromium you'll see warnings in devtools console, although you can safely ignore them as the adverse affects are negligible in this case. You can hide the warnings for good by right-clicking one."
+  },
+  "labelXhrInjectNote": {
+    "message": "(except incognito and sites with disabled cookies)"
+  },
+  "lastSync": {
+    "message": "Poslední synchronizace na $1"
+  },
+  "learnBlacklist": {
+    "message": "Zjisti víc o schéma blacklistu."
+  },
+  "learnInjectionMode": {
+    "message": "Learn more about injection modes."
+  },
+  "linkManageRemoteFiles": {
+    "message": "Manage remote files"
+  },
+  "menuDashboard": {
+    "message": "Otevřít Dashboard"
+  },
+  "menuExclude": {
+    "message": "Exclude..."
+  },
+  "menuExcludeHint": {
+    "message": "The current tab will auto-reload if you enabled this option in general settings.\nTo apply changes to all other tabs please reload them manually.\nUse \"Settings\" tab of the editor for more flexibility."
+  },
+  "menuFeedback": {
+    "message": "Zpětná vazba"
+  },
+  "menuFindScripts": {
+    "message": "Najdi skripty pro tuto stránku"
+  },
+  "menuInjectionFailed": {
+    "message": "Could not inject some scripts."
+  },
+  "menuInjectionFailedFix": {
+    "message": "Retry in \"auto\" mode"
+  },
+  "menuMatchedDisabledScripts": {
+    "message": "Matched disabled scripts"
+  },
+  "menuMatchedFrameScripts": {
+    "message": "Sub-frames only scripts"
+  },
+  "menuMatchedScripts": {
+    "message": "Shodné skripty"
+  },
+  "menuNewScript": {
+    "message": "Create a new script"
+  },
+  "menuScriptDisabled": {
+    "message": "Vypnuté skripty"
+  },
+  "menuScriptEnabled": {
+    "message": "Skripty zapnuty"
+  },
+  "msgCheckingForUpdate": {
+    "message": "Kontroluji aktualizace..."
+  },
+  "msgDateFormatInfo": {
+    "message": "Click to open MomentJS documentation. Allowed tokens: $1. Use [square brackets] to protect literal text."
+  },
+  "msgErrorFetchingResource": {
+    "message": "Error fetching resource!"
+  },
+  "msgErrorFetchingScript": {
+    "message": "Chyba při načítání skritpu!"
+  },
+  "msgErrorFetchingUpdateInfo": {
+    "message": "Načtení informací o aktualizaci se nezdařilo."
+  },
+  "msgErrorLoadingData": {
+    "message": "Chyba při načítání skriptu."
+  },
+  "msgErrorLoadingDependency": {
+    "message": "Chyba při načítání požadavků."
+  },
+  "msgImported": {
+    "message": "$1 věc(i) jsou obnoveny."
+  },
+  "msgIncognitoChanges": {
+    "message": "Changes you make in the incognito mode also apply to your main profile."
+  },
+  "msgInstalled": {
+    "message": "Skript nainstalován."
+  },
+  "msgInvalidScript": {
+    "message": "Špatný skript!"
+  },
+  "msgLoadingData": {
+    "message": "Nahrávám skript..."
+  },
+  "msgLoadingDependency": {
+    "message": "Vkládání požadavků... ($1/$2)"
+  },
+  "msgMissingResources": {
+    "message": "Missing required resources."
+  },
+  "msgNamespaceConflict": {
+    "message": "Stejný skript je již nainstalován.\nProsím změň @name nebo @namespace zde nebo změň skript."
+  },
+  "msgNamespaceConflictRestore": {
+    "message": "A script with the same @name and @namespace is already installed."
+  },
+  "msgNewVersion": {
+    "message": "Nalezena nová verze."
+  },
+  "msgNoUpdate": {
+    "message": "Aktualizace nenalezena."
+  },
+  "msgOpenUpdateErrors": {
+    "message": "Error updating scripts. Click to open them."
+  },
+  "msgReinstallScripts": {
+    "message": "Please re-save or reinstall these script(s):"
+  },
+  "msgSameCode": {
+    "message": " (code is the same)"
+  },
+  "msgScriptUpdated": {
+    "message": "Script [$1] is updated!"
+  },
+  "msgShowHide": {
+    "message": "Show/hide"
+  },
+  "msgSyncError": {
+    "message": "Chyba synchronizace!"
+  },
+  "msgSyncInit": {
+    "message": "Inicializace..."
+  },
+  "msgSyncInitError": {
+    "message": "Chyba inicializace!"
+  },
+  "msgSyncNoAuthYet": {
+    "message": "Not authorized yet."
+  },
+  "msgSyncing": {
+    "message": "Probíhá synchronizace..."
+  },
+  "msgSyntaxError": {
+    "message": "Syntax error?"
+  },
+  "msgTardyMatch": {
+    "message": "The script didn't exist or didn't match the URL when the page loaded, which happens in Single-Page Application sites like fb or instagram that are using fake navigation. You can reload the tab to run the script. To fix the script use @match for the entire site and then detect changes using MutationObserver or window.navigation API."
+  },
+  "msgUpdated": {
+    "message": "Skript aktualizován."
+  },
+  "msgUpdating": {
+    "message": "Aktualizuji..."
+  },
+  "noValues": {
+    "message": "No value is stored"
+  },
+  "optionEditorWindow": {
+    "message": "Open editor from popup in a new window"
+  },
+  "optionEditorWindowHint": {
+    "message": "Editor window position will be remembered only on resizing or saving"
+  },
+  "optionEditorWindowSimple": {
+    "message": "Hide omnibox"
+  },
+  "optionPopup": {
+    "message": "Popup menu and icon"
+  },
+  "optionPopupEnabledFirst": {
+    "message": "Enabled first"
+  },
+  "optionPopupGroupRunAt": {
+    "message": "Group by @run-at stage"
+  },
+  "optionShowEnabledFirst": {
+    "message": "Zbraz první zapnuté skripty"
+  },
+  "optionUiTheme": {
+    "message": "UI theme: "
+  },
+  "optionUiThemeAuto": {
+    "message": "automatic"
+  },
+  "optionUiThemeDark": {
+    "message": "dark"
+  },
+  "optionUiThemeLight": {
+    "message": "light"
+  },
+  "optionUpdate": {
+    "message": "Aktualizace"
+  },
+  "popupSettings": {
+    "message": "Popup settings"
+  },
+  "popupSettingsHint": {
+    "message": "Right-click: popup settings"
+  },
+  "readonly": {
+    "message": "Read-only"
+  },
+  "readonlyNote": {
+    "message": "Auto-updated script is read-only unless you disable updates or allow editing."
+  },
+  "readonlyOpt": {
+    "message": "Allow edits"
+  },
+  "readonlyOptWarn": {
+    "message": "(next update will overwrite them)"
+  },
+  "reinstall": {
+    "message": "Reinstall"
+  },
+  "reloadTab": {
+    "message": "Reload tab"
+  },
+  "reloadTabTrackHint": {
+    "message": "If enabled, the active tab will be reloaded when changes are detected and this script matches the tab's URL."
+  },
+  "searchCaseSensitive": {
+    "message": "Case sensitive"
+  },
+  "searchUseRegex": {
+    "message": "Use Regex"
+  },
+  "sideMenuAbout": {
+    "message": "O rozšíření"
+  },
+  "sideMenuInstalled": {
+    "message": "Nainstalované skripty"
+  },
+  "sideMenuScripts": {
+    "message": "Scripts"
+  },
+  "sideMenuSettings": {
+    "message": "Nastavení"
+  },
+  "skipScripts": {
+    "message": "Reload page without userscripts"
+  },
+  "skipScriptsMsg": {
+    "message": "You disabled userscripts for this page. To run them, reload or navigate the tab."
+  },
+  "sortOrder": {
+    "message": "Sort order:"
+  },
+  "stopTracking": {
+    "message": "Stop tracking"
+  },
+  "titleBadgeColor": {
+    "message": "Normal badge color"
+  },
+  "titleBadgeColorBlocked": {
+    "message": "Badge color when the site is non-injectable (blacklisted or unsupported)"
+  },
+  "titleSearchHintV2": {
+    "message": "* <kbd>Enter</kbd> key adds the text to autocomplete history\n* All conditions are case-insensitive\n* Space separated conditions can be combined\n* Search by metadata: <code>\"Awesome Script\" \"Description\"</code>\n* Search by tags: <code>#tag1 #tag2</code>\n* Search by script name: <code>name:\"awesome name\"</code>\n* Search by script code: <code>code:\"awesome code\"</code>\n* Negative search: <code>!#tag2 !name:\"unwanted\"</code>\n* Regular expressions: <code>/\\w+?/</code>, <code>/\\w+?/gi</code>, <code>name:/\\w+?/</code>, <code>name+re:\"\\w+? with space\"</code>"
+  },
+  "toggleInjection": {
+    "message": "Toggle userscript injection"
+  },
+  "trackEdits": {
+    "message": "Track external edits"
+  },
+  "trackEditsNote": {
+    "message": "Keep this page open to track your edits in local file"
+  },
+  "updateListedCmd": {
+    "message": "Update scripts ($1)"
+  },
+  "updateScript": {
+    "message": "Aktualizace"
+  },
+  "updateScriptForced": {
+    "message": "Right-click or long touch to force-update including dependencies"
+  },
+  "updateScriptsAll": {
+    "message": "Update all scripts"
+  },
+  "updateScriptsInTab": {
+    "message": "Update current tab's scripts"
+  },
+  "userScriptsPermissionNote": {
+    "message": "Please enable \"Allow User Scripts\" in details for Violentmonkey in chrome://extensions and reload the tab"
+  },
+  "userScriptsPermissionNoteOld": {
+    "message": "Please enable \"Developer Mode\" in chrome://extensions and reload the tab"
+  },
+  "valueLabelKey": {
+    "message": "Key (string)"
+  },
+  "valueLabelValue": {
+    "message": "Value (serialized as JSON)"
+  },
+  "valueLabelValueAll": {
+    "message": "All values (serialized as JSON)"
+  },
+  "valueLabelValueOr": {
+    "message": "Value (serialized as JSON or $1)"
+  },
+  "valueLabelValueString": {
+    "message": "$1 string"
+  }
+}

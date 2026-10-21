@@ -144,7 +144,11 @@ pub async fn recreate_tab_webviews(app: &AppHandle) -> Result<(), String> {
     let labels: Vec<String> = app
         .webviews()
         .keys()
-        .filter(|label| label.starts_with("tab-"))
+        .filter(|label| {
+            label.starts_with("tab-")
+                || label.starts_with("extension-host-")
+                || label.as_str() == "extension-popup"
+        })
         .cloned()
         .collect();
     for label in labels {
@@ -188,7 +192,7 @@ pub fn emit_snapshot(app: &AppHandle) {
 /// SPA / History API 不会走 on_page_load，这里只改 tab.url 并推快照。
 fn apply_tab_url(app: &AppHandle, tab_id: &str, url: &str) {
     let url = url.trim();
-    if url.is_empty() {
+    if url.is_empty() || url == "about:blank" {
         return;
     }
     let changed = app
@@ -332,17 +336,19 @@ pub fn ensure_tab_webview(app: &AppHandle, tab_id: &str) -> Result<(), String> {
     let tab_id_for_title = tab_id.to_string();
     let tab_id_for_load = tab_id.to_string();
 
-    let builder = WebviewBuilder::new(label.clone(), WebviewUrl::External(external))
-        .data_directory(data_dir)
-        .focused(is_active)
-        .enable_clipboard_access()
-        .zoom_hotkeys_enabled(true)
-        .devtools(cfg!(debug_assertions))
-        .initialization_script(OPEN_TARGET_BLANK_IN_CURRENT_TAB)
-        .initialization_script(if muted { MUTE_TAB_SCRIPT } else { "" })
-        // 扩展加载进标签共享的 WebView2 Profile；目录不存在时 wry 的加载器安全跳过。
-        .browser_extensions_enabled(true)
-        .extensions_path(extensions_dir(app));
+    // 等扩展注册完成后再进入网页，确保首次访问也能执行用户脚本。
+    let builder = WebviewBuilder::new(
+        label.clone(),
+        WebviewUrl::External("about:blank".parse().unwrap()),
+    )
+    .data_directory(data_dir)
+    .focused(is_active)
+    .enable_clipboard_access()
+    .zoom_hotkeys_enabled(true)
+    .devtools(cfg!(debug_assertions))
+    .initialization_script(OPEN_TARGET_BLANK_IN_CURRENT_TAB)
+    .initialization_script(if muted { MUTE_TAB_SCRIPT } else { "" })
+    .browser_extensions_enabled(true);
     let builder = match &proxy_args {
         Some(args) => builder.additional_browser_args(args),
         None => builder,
@@ -368,6 +374,9 @@ pub fn ensure_tab_webview(app: &AppHandle, tab_id: &str) -> Result<(), String> {
         })
         .on_page_load(move |_webview, payload| {
             let next_url = payload.url().to_string();
+            if next_url == "about:blank" {
+                return;
+            }
             let loading = payload.event() == PageLoadEvent::Started;
             let state = app_for_load.state::<AppState>();
             let _ = state.mutate(|runtime| {
@@ -402,10 +411,12 @@ pub fn ensure_tab_webview(app: &AppHandle, tab_id: &str) -> Result<(), String> {
         })
         .on_download(move |_webview, event| handle_download(&app_for_download, event))
         .on_new_window(move |url, _features| {
-            let url = url.to_string();
-            if let Err(error) = create_tab(&app_for_new_window, Some(url), true) {
-                eprintln!("无法打开新标签页: {error}");
-            }
+            let app = app_for_new_window.clone();
+            tauri::async_runtime::spawn(async move {
+                if let Err(error) = create_tab(&app, Some(url.to_string()), true) {
+                    eprintln!("无法打开新标签页: {error}");
+                }
+            });
             tauri::webview::NewWindowResponse::Deny
         });
 
@@ -419,6 +430,31 @@ pub fn ensure_tab_webview(app: &AppHandle, tab_id: &str) -> Result<(), String> {
     // 创建即下沉：保证新标签 WebView 永远位于 UI 层（main WebView）之下。
     sink_tab_below_shell(app);
     install_tab_shortcuts(app, &webview, tab_id)?;
+    let app_for_extensions = app.clone();
+    let webview_for_extensions = webview.clone();
+    tauri::async_runtime::spawn(async move {
+        if let Err(error) =
+            crate::extensions::load_profile(&app_for_extensions, &webview_for_extensions).await
+        {
+            eprintln!("网页扩展加载失败: {error}");
+        } else {
+            let should_navigate = app_for_extensions
+                .state::<AppState>()
+                .inner
+                .lock()
+                .ok()
+                .is_some_and(|runtime| {
+                    !runtime.locked
+                        && runtime.data.tabs.iter().any(|tab| {
+                            tab_label(&tab.id) == webview_for_extensions.label()
+                                && tab.url == external.as_str()
+                        })
+                });
+            if should_navigate {
+                let _ = webview_for_extensions.navigate(external);
+            }
+        }
+    });
     if !is_active {
         webview.hide().map_err(|error| error.to_string())?;
     }
