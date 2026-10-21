@@ -71,6 +71,8 @@ pub async fn ensure_loaded(app: &AppHandle) -> Result<(), String> {
             .visible(false)
             .focused(false)
             .skip_taskbar(true)
+            // 标题不能用 Tauri 默认值；旧版窗口状态插件曾把它恢复成可见窗口。
+            .title("QuickPane Extension Host")
             .data_directory(crate::browser::browser_data_dir(app)?)
             .browser_extensions_enabled(true);
             if let Some(args) = args {

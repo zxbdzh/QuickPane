@@ -753,6 +753,11 @@ async fn show_extension_popup(
     extensions::ensure_loaded(&app).await?;
     require_unlocked(&app)?;
     let parsed = extensions::page_url(&app, &extension_id, false)?;
+    let popup_height = if extension_id == extensions::BUILTIN_ID {
+        360.0
+    } else {
+        620.0
+    };
     let main = app
         .get_window("main")
         .ok_or_else(|| "主窗口不存在".to_string())?;
@@ -783,14 +788,7 @@ async fn show_extension_popup(
             .lock()
             .map_err(|_| "扩展弹窗状态异常".to_string())? = Some(std::time::Instant::now());
         popup
-            .set_size(tauri::LogicalSize::new(
-                400.0,
-                if extension_id == extensions::BUILTIN_ID {
-                    360.0
-                } else {
-                    620.0
-                },
-            ))
+            .set_size(tauri::LogicalSize::new(400.0, popup_height))
             .map_err(|error| error.to_string())?;
         popup.navigate(parsed).map_err(|error| error.to_string())?;
         let _ = popup.set_position(position);
@@ -819,14 +817,7 @@ async fn show_extension_popup(
         tauri::WebviewUrl::External(Url::parse("about:blank").unwrap()),
     )
     .title("扩展面板")
-    .inner_size(
-        400.0,
-        if extension_id == extensions::BUILTIN_ID {
-            360.0
-        } else {
-            620.0
-        },
-    )
+    .inner_size(400.0, popup_height)
     .position(position.x, position.y)
     .decorations(false)
     .always_on_top(true)
@@ -869,14 +860,34 @@ async fn show_extension_popup(
             tauri::webview::NewWindowResponse::Deny
         }
     });
+    let popup_size = tauri::LogicalSize::new(400.0, popup_height);
+    builder = builder.visible(false).on_page_load(move |popup, payload| {
+        // 扩展页脚本完成前窗口是白的；about:blank 和加载开始都不能显示。
+        if payload.event() != tauri::webview::PageLoadEvent::Finished
+            || payload.url().as_str() == "about:blank"
+        {
+            return;
+        }
+        if EXTENSION_POPUP_SHOWN_AT
+            .lock()
+            .ok()
+            .and_then(|shown| *shown)
+            .is_some()
+        {
+            return;
+        }
+        if let Ok(mut shown) = EXTENSION_POPUP_SHOWN_AT.lock() {
+            *shown = Some(std::time::Instant::now());
+        }
+        // 隐藏创建时 WebView 视口停在 2×2，只改窗口尺寸不会同步页面布局。
+        let _ = popup.set_size(popup_size);
+        let _ = popup.show();
+        let _ = popup.set_focus();
+    });
     let popup = builder.build().map_err(|error| error.to_string())?;
     extensions::load_profile(&app, popup.as_ref()).await?;
     // 先确认注册完成再首次导航，避免扩展页被当成不存在的资源拦截。
     popup.navigate(parsed).map_err(|error| error.to_string())?;
-    *EXTENSION_POPUP_SHOWN_AT
-        .lock()
-        .map_err(|_| "扩展弹窗状态异常".to_string())? = Some(std::time::Instant::now());
-    let _ = popup.set_focus();
     Ok(())
 }
 
@@ -1262,7 +1273,12 @@ pub fn run() {
         .plugin(tauri_plugin_single_instance::init(|app, _args, _cwd| {
             show_window(app);
         }))
-        .plugin(tauri_plugin_window_state::Builder::default().build())
+        .plugin(
+            tauri_plugin_window_state::Builder::default()
+                // 只恢复主窗口，避免插件把隐藏宿主显示出来或覆盖扩展弹窗尺寸。
+                .with_filter(|label| label == "main")
+                .build(),
+        )
         .plugin(tauri_plugin_global_shortcut::Builder::new().build())
         .plugin(
             tauri_plugin_autostart::Builder::new()
