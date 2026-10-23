@@ -4,7 +4,7 @@ import test from "node:test";
 
 const app = await readFile(new URL("../src-tauri/src/lib.rs", import.meta.url), "utf8");
 
-test("复用扩展弹窗时必须先隐藏、清空状态，再由加载完成回调显示", () => {
+test("重新打开扩展弹窗必须销毁旧窗口，避免 WebView 白屏旧状态", () => {
   const popup = app.slice(
     app.indexOf("async fn show_extension_popup"),
     app.indexOf("fn toggle_extension_pin"),
@@ -13,10 +13,9 @@ test("复用扩展弹窗时必须先隐藏、清空状态，再由加载完成�
     popup.indexOf('if let Some(popup) = app.get_webview_window("extension-popup")'),
     popup.indexOf("// 必须与标签页 WebView"),
   );
-  assert.match(reuse, /popup\.hide\(\)/);
-  assert.match(reuse, /\*EXTENSION_POPUP_SHOWN_AT[\s\S]*= None/);
-  assert.match(reuse, /popup\.navigate\(parsed\)/);
+  assert.match(reuse, /popup\.destroy\(\)/);
   assert.doesNotMatch(reuse, /popup\.show\(\)/);
+  assert.doesNotMatch(reuse, /popup\.navigate\(/);
 });
 
 test("窗口状态只恢复主窗口，不能显示隐藏的扩展宿主", () => {

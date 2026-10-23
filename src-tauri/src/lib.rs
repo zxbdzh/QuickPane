@@ -784,18 +784,23 @@ async fn show_extension_popup(
     };
 
     if let Some(popup) = app.get_webview_window("extension-popup") {
-        // 复用时必须沿用首次创建的“隐藏→导航→加载完成后显示”顺序。
-        let _ = popup.hide();
-        *EXTENSION_POPUP_SHOWN_AT
-            .lock()
-            .map_err(|_| "扩展弹窗状态异常".to_string())? = None;
-        popup
-            .set_size(tauri::LogicalSize::new(400.0, popup_height))
-            .map_err(|error| error.to_string())?;
-        popup.navigate(parsed).map_err(|error| error.to_string())?;
-        let _ = popup.set_position(position);
-        return Ok(());
+        // 弹窗 WebView 在被拦截导航或渲染器异常后会停留不可恢复的白屏状态，
+        // 复用旧窗口必然携带旧状态；每次销毁重建最可靠。
+        popup.destroy().map_err(|error| error.to_string())?;
+        // destroy 走事件循环异步移除；标签未释放时重建会报 already exists。
+        for _ in 0..50 {
+            if app.get_webview_window("extension-popup").is_none() {
+                break;
+            }
+            tauri::async_runtime::spawn_blocking(|| std::thread::sleep(Duration::from_millis(20)))
+                .await
+                .map_err(|error| error.to_string())?;
+        }
     }
+    // 新建窗口要靠 on_page_load 显示；旧标记不清空会让回调直接跳过。
+    *EXTENSION_POPUP_SHOWN_AT
+        .lock()
+        .map_err(|_| "扩展弹窗状态异常".to_string())? = None;
 
     // 必须与标签页 WebView 共享数据目录和环境参数（扩展、代理），否则 WebView2
     // 会因环境不一致而创建失败，且扩展在该窗口中不可用。
