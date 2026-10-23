@@ -784,16 +784,16 @@ async fn show_extension_popup(
     };
 
     if let Some(popup) = app.get_webview_window("extension-popup") {
+        // 复用时必须沿用首次创建的“隐藏→导航→加载完成后显示”顺序。
+        let _ = popup.hide();
         *EXTENSION_POPUP_SHOWN_AT
             .lock()
-            .map_err(|_| "扩展弹窗状态异常".to_string())? = Some(std::time::Instant::now());
+            .map_err(|_| "扩展弹窗状态异常".to_string())? = None;
         popup
             .set_size(tauri::LogicalSize::new(400.0, popup_height))
             .map_err(|error| error.to_string())?;
         popup.navigate(parsed).map_err(|error| error.to_string())?;
         let _ = popup.set_position(position);
-        let _ = popup.show();
-        let _ = popup.set_focus();
         return Ok(());
     }
 
